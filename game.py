@@ -54,6 +54,12 @@ GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
 STARTING_GUN_AMMO = 1
 AMMO_PER_PICKUP = 1
 
+# Volley: surplus ammo converts to shots per trigger (small spread).
+# 1 shot below 15 ammo, 2 at 15+, 3 at 30+, 4 at 45+.
+VOLLEY_STEP = 15
+VOLLEY_MAX_SHOTS = 4
+VOLLEY_SPREAD_DEG = 3.0  # degrees between adjacent volley shots
+
 ADVANCE_SPEED_BASE = 6.0   # px/sec at start
 ADVANCE_SPEED_MAX = 25.0   # cap
 
@@ -63,6 +69,10 @@ ACID_RADIUS_CELLS = 1.5
 ACID_DURATION = 5.0   # seconds
 ACID_TICK = 1.0       # seconds between ticks
 
+TAR_RADIUS_CELLS = 1.5
+TAR_DURATION = 8.0  # seconds
+TAR_SLOW = 0.5      # fraction of advance speed removed inside the zone
+
 FREEZE_DURATION = 5.0  # seconds
 REVERSE_DURATION = 3.0  # seconds
 
@@ -70,6 +80,7 @@ FIREBALL_CHARGES = 5    # shots as fireball per pickup
 HOMING_CHARGES = 5      # shots as homing per pickup
 
 LIGHTNING_STRIKES = 6      # bricks hit per lightning trigger
+LIGHTNING_STUN = 1.0       # seconds a struck brick stops advancing
 LIGHTNING_BOLT_TTL = 0.35  # seconds a bolt stays visible
 
 SKULL_START = 600.0     # seconds of game time before skulls appear
@@ -78,15 +89,16 @@ SKULL_ROWS = 4          # skulls spawn only in the bottom N usable rows
 
 MERGE_CHANCE = 0.25  # chance a spawning square fuses with the one below
 
-MORTAR_TYPES = ["bomb", "mine", "acid", "wall"]
+MORTAR_TYPES = ["bomb", "mine", "acid", "wall", "tar"]
 MORTAR_COOLDOWN = 0.6  # seconds between mortar shots
 
 # Unlock thresholds (wave number)
 UNLOCK = {
-    "mines": 3, "wall": 3, "bombs": 5, "fireball": 7, "acid": 8,
-    "freeze": 10, "reverse": 10, "homing": 11,
+    # Pickups: one new type every 5th wave
+    "mines": 5, "wall": 10, "bombs": 15, "tar": 20, "fireball": 25,
+    "acid": 30, "freeze": 35, "reverse": 40, "lightning": 45, "homing": 50,
+    # Brick shapes and properties
     "round": 15, "diamond": 15,
-    "lightning": 20,
     "hexagon": 30, "trapezoid": 30, "wide": 30,
     "triangle": 50, "shields": 60, "merging": 70,
 }
@@ -132,6 +144,8 @@ class Brick:
     shield: int = 0
     held: float = 0.0    # px held back by a wall/stack this frame
     acid_t: float = 0.0  # seconds of acid tint remaining
+    stun: float = 0.0    # seconds of lightning stun remaining
+    lag: float = 0.0     # px behind the global offset (from stuns)
 
     def cells(self) -> list[tuple[int, int]]:
         """Grid cells occupied by this brick."""
@@ -273,6 +287,7 @@ class Game:
         # Placed items from mortar fire (stationary)
         self.placed_mines: list[dict] = []  # {x, y} — explode when brick touches
         self.placed_acids: list[dict] = []  # {x, y, timer, tick} — area DoT
+        self.placed_tars: list[dict] = []   # {x, y, timer} — slow zone
         self.placed_walls: list[dict] = []  # {y, hp} — horizontal barrier
         self.wall_weight = 0  # total HP resting on walls (for HUD)
 
@@ -380,6 +395,19 @@ class Game:
                     self.brick_offset += CELL_SIZE
                     self._retreat_rows()
             else:
+                # Stunned bricks stand still, tarred bricks slow down,
+                # while the offset advances. Not additive — a stunned
+                # brick in tar still just stops. (Wall-held bricks are
+                # already stopped — no extra lag.)
+                for b in self.bricks:
+                    slow = 0.0
+                    if b.stun > 0:
+                        b.stun -= dt
+                        slow = 1.0
+                    elif self.placed_tars and self._in_tar(b):
+                        slow = TAR_SLOW
+                    if slow > 0 and b.held <= 0:
+                        b.lag += self.advance_speed * slow * dt
                 self.brick_offset += self.advance_speed * dt
                 while self.brick_offset >= CELL_SIZE:
                     self.brick_offset -= CELL_SIZE
@@ -457,6 +485,11 @@ class Game:
         # Acid zones: tick damage on nearby bricks
         self._update_acids(dt)
 
+        # Tar zones: expire
+        for tar in self.placed_tars:
+            tar["timer"] -= dt
+        self.placed_tars = [t for t in self.placed_tars if t["timer"] > 0]
+
         # Mark bricks touched by acid, decay timer when outside
         self._update_acid_tint(dt)
 
@@ -519,9 +552,21 @@ class Game:
         p.vel.x = math.cos(new_angle) * speed
         p.vel.y = math.sin(new_angle) * speed
 
+    def _in_tar(self, brick: Brick) -> bool:
+        """True if the brick touches any tar zone."""
+        tar_px = TAR_RADIUS_CELLS * CELL_SIZE
+        rect = cell_rect(brick.col, brick.row, brick.shape,
+                         self._brick_off(brick))
+        for tar in self.placed_tars:
+            cx = max(rect.left, min(tar["x"], rect.right))
+            cy = max(rect.top, min(tar["y"], rect.bottom))
+            if math.hypot(cx - tar["x"], cy - tar["y"]) < tar_px:
+                return True
+        return False
+
     def _brick_off(self, brick: Brick) -> float:
-        """Effective y offset for a brick (accounts for wall hold-back)."""
-        return self.brick_offset - brick.held
+        """Effective y offset for a brick (wall hold-back + stun lag)."""
+        return self.brick_offset - brick.held - brick.lag
 
     def _update_wall_blocking(self):
         """Pin bricks at walls, and stack bricks on top of stopped bricks."""
@@ -532,7 +577,7 @@ class Game:
         # First pass: pin bricks directly at walls
         for brick in self.bricks:
             bottom = (GRID_TOP + (brick.row + 1) * CELL_SIZE
-                      + brick.extra_height + self.brick_offset)
+                      + brick.extra_height + self.brick_offset - brick.lag)
             for w in self.placed_walls:
                 if bottom > w["y"]:
                     brick.held = bottom - w["y"]
@@ -548,28 +593,27 @@ class Game:
         col_barrier: dict[int, float] = {}  # col -> min top pixel of stopped bricks
 
         for brick in sorted_bricks:
-            eff_offset = self.brick_offset - brick.held
+            eff_offset = self.brick_offset - brick.held - brick.lag
             top = GRID_TOP + brick.row * CELL_SIZE + eff_offset
             bottom = top + CELL_SIZE + brick.extra_height
             cols = brick.cols()
 
-            # Check if this brick is blocked (has held > 0)
-            if brick.held > 0:
-                for c in cols:
-                    if c not in col_barrier or top < col_barrier[c]:
-                        col_barrier[c] = top
-            else:
-                # Check if any column has a barrier below this brick
+            # Not pinned at a wall: stop at any barrier below
+            if brick.held <= 0:
                 for c in cols:
                     if c in col_barrier and bottom > col_barrier[c]:
                         brick.held += bottom - col_barrier[c]
-                        # Recalculate top with new held
-                        eff_offset = self.brick_offset - brick.held
+                        eff_offset = (self.brick_offset - brick.held
+                                      - brick.lag)
                         top = GRID_TOP + brick.row * CELL_SIZE + eff_offset
-                        for c2 in cols:
-                            if c2 not in col_barrier or top < col_barrier[c2]:
-                                col_barrier[c2] = top
                         break
+
+            # Stopped (wall/stack) or lagging (stun) bricks are barriers
+            # for the bricks above them
+            if brick.held > 0 or brick.lag > 0:
+                for c in cols:
+                    if c not in col_barrier or top < col_barrier[c]:
+                        col_barrier[c] = top
 
     def _check_game_over(self) -> bool:
         for b in self.bricks:
@@ -591,6 +635,12 @@ class Game:
 
         # Process bottom-to-top so lower bricks block upper ones
         for b in sorted(self.bricks, key=lambda x: -x.row):
+            if b.lag >= CELL_SIZE:
+                # A full cell behind: keep the row, roll the lag over.
+                # Block bricks above like a held brick would.
+                b.lag -= CELL_SIZE
+                held_cells.update(b.cells())
+                continue
             if b.held >= CELL_SIZE:
                 b.held -= CELL_SIZE
                 continue
@@ -849,6 +899,7 @@ class Game:
         _spawn_grid("bombs", 0.25, "bomb")
         _spawn_grid("acid", 0.20, "acid")
         _spawn_grid("wall", 0.15, "wall")
+        _spawn_grid("tar", 0.15, "tar")
 
         # Gun PUs (grid-based, advance with bricks, ball hit to activate)
         _spawn_grid("fireball", 0.15, "fireball")
@@ -877,26 +928,34 @@ class Game:
         angle = min(angle, -0.15)
         self.aim_angle = angle
 
+    def volley_size(self) -> int:
+        """Shots per trigger — grows with the ammo pool."""
+        return min(VOLLEY_MAX_SHOTS, 1 + self.gun_ammo // VOLLEY_STEP)
+
     def fire_gun(self) -> bool:
         if self.gun_ammo <= 0 or self.gun_cooldown > 0:
             return False
-        self.gun_ammo -= 1
+        shots = min(self.volley_size(), self.gun_ammo)
         self.gun_cooldown = GUN_COOLDOWN
         launch_x = self.gun_x
         launch_y = GRID_BOTTOM - PROJECTILE_RADIUS
-        vel = pygame.math.Vector2(
-            math.cos(self.aim_angle) * PROJECTILE_SPEED,
-            math.sin(self.aim_angle) * PROJECTILE_SPEED,
-        )
-        p = Projectile(pygame.math.Vector2(launch_x, launch_y), vel)
-        if self.fireball_charges > 0:
-            p.fireball = True
-            self.fireball_charges -= 1
-        elif self.homing_charges > 0:
-            p.homing = True
-            p.homing_timer = 10.0  # 10 sec homing per projectile
-            self.homing_charges -= 1
-        self.projectiles.append(p)
+        spread = math.radians(VOLLEY_SPREAD_DEG)
+        for i in range(shots):
+            self.gun_ammo -= 1
+            angle = self.aim_angle + (i - (shots - 1) / 2) * spread
+            vel = pygame.math.Vector2(
+                math.cos(angle) * PROJECTILE_SPEED,
+                math.sin(angle) * PROJECTILE_SPEED,
+            )
+            p = Projectile(pygame.math.Vector2(launch_x, launch_y), vel)
+            if self.fireball_charges > 0:
+                p.fireball = True
+                self.fireball_charges -= 1
+            elif self.homing_charges > 0:
+                p.homing = True
+                p.homing_timer = 10.0  # 10 sec homing per projectile
+                self.homing_charges -= 1
+            self.projectiles.append(p)
         return True
 
     def cycle_mortar(self, step: int):
@@ -923,6 +982,15 @@ class Game:
                 return False
         self.mortar_ammo[mtype] -= 1
         self.mortar_cooldown = MORTAR_COOLDOWN
+        # Keep the HUD highlight on the type actually firing; when it
+        # runs dry, advance to the next stocked type
+        self.mortar_sel = MORTAR_TYPES.index(mtype)
+        if self.mortar_ammo[mtype] <= 0:
+            for i in range(1, len(MORTAR_TYPES)):
+                t = MORTAR_TYPES[(self.mortar_sel + i) % len(MORTAR_TYPES)]
+                if self.mortar_ammo[t] > 0:
+                    self.mortar_sel = MORTAR_TYPES.index(t)
+                    break
         mx, my = self.crosshair
         my = max(GRID_TOP, min(GRID_BOTTOM, my))
         # Launch from gun position
@@ -950,6 +1018,10 @@ class Game:
             self.placed_acids.append({
                 "x": mx, "y": my,
                 "timer": ACID_DURATION, "tick": 0.0,
+            })
+        elif mtype == "tar":
+            self.placed_tars.append({
+                "x": mx, "y": my, "timer": TAR_DURATION,
             })
         elif mtype == "wall":
             self.placed_walls.append({
@@ -1284,17 +1356,18 @@ class Game:
         }
 
     def _trigger_lightning(self, x: float, y: float):
-        """Chain strikes from the trigger point through random bricks."""
+        """Chain strikes: light damage + 1s stun on random bricks."""
         if not self.bricks:
             return
         targets = random.sample(self.bricks,
                                 min(LIGHTNING_STRIKES, len(self.bricks)))
-        damage = max(1, self.wave)
+        damage = max(1, self.wave // 5)
         points = [(x, y)]
         for b in targets:
             rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
             points.append(rect.center)
             b.hp -= damage
+            b.stun = LIGHTNING_STUN
         self.bricks = [b for b in self.bricks if b.hp > 0]
         self.lightning_bolts.append({
             "points": _jagged_path(points),

@@ -5,7 +5,8 @@ import pygame
 from game import FPS, HEIGHT, WIDTH, Game
 from render import draw_game, draw_help, draw_menu
 
-MORTAR_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3}
+MORTAR_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
+               pygame.K_5: 4}
 
 
 def main():

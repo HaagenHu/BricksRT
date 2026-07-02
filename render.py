@@ -8,7 +8,8 @@ import pygame
 from game import (
     WIDTH, HEIGHT, TOP_UI_HEIGHT, BOTTOM_AREA_HEIGHT, GRID_TOP, GRID_BOTTOM,
     CELL_SIZE, BRICK_SIZE, PROJECTILE_RADIUS, BOMB_RADIUS_CELLS,
-    ACID_RADIUS_CELLS, MORTAR_TYPES, UNLOCK, Brick, Game, cell_rect,
+    ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, MORTAR_TYPES, UNLOCK,
+    Brick, Game, cell_rect,
 )
 
 # Colors
@@ -23,6 +24,7 @@ MINE_COLOR = (255, 50, 50)
 MORTAR_BOMB_COLOR = (255, 80, 50)
 MORTAR_ACID_COLOR = (120, 255, 0)
 MORTAR_WALL_COLOR = (255, 160, 40)
+TAR_COLOR = (150, 125, 90)
 FREEZE_COLOR = (150, 230, 255)
 REVERSE_COLOR = (255, 80, 80)
 FIREBALL_COLOR = (255, 100, 0)
@@ -39,6 +41,7 @@ PICKUP_STYLE = {
     "mine": (MINE_COLOR, "M", 0.22),
     "acid": (MORTAR_ACID_COLOR, "A", 0.22),
     "wall": (MORTAR_WALL_COLOR, "W", 0.22),
+    "tar": (TAR_COLOR, "T", 0.22),
     "fireball": (FIREBALL_COLOR, "F", 0.22),
     "homing": (HOMING_COLOR, "H", 0.22),
 }
@@ -48,6 +51,7 @@ MORTAR_STYLE = {
     "mine": (MINE_COLOR, "M"),
     "acid": (MORTAR_ACID_COLOR, "A"),
     "wall": (MORTAR_WALL_COLOR, "W"),
+    "tar": (TAR_COLOR, "T"),
 }
 
 
@@ -110,7 +114,7 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                font: pygame.font.Font, y_offset: float = 0,
                danger: bool = False, time: float = 0.0,
                frozen: bool = False, in_acid: bool = False,
-               reversing: bool = False):
+               reversing: bool = False, stunned: bool = False):
     shape = brick.shape
     color = brick_color(brick.hp)
     rect = cell_rect(brick.col, brick.row, shape, y_offset)
@@ -119,9 +123,10 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
     if rect.bottom < GRID_TOP or rect.top > GRID_BOTTOM:
         return
 
-    # Frozen/reverse: frame drawn after shape
+    # Frozen/stun/reverse: frame drawn after shape
     draw_ice_frame = frozen
-    draw_reverse_frame = reversing and not frozen
+    draw_stun_frame = stunned and not frozen
+    draw_reverse_frame = reversing and not frozen and not stunned
 
     # Acid tint: shift toward green with pulse
     if in_acid:
@@ -141,6 +146,7 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         color = (r, g, b)
 
     frame_color = (FREEZE_COLOR if draw_ice_frame
+                   else LIGHTNING_COLOR if draw_stun_frame
                    else REVERSE_COLOR if draw_reverse_frame else None)
 
     if shape == "round":
@@ -265,7 +271,7 @@ def draw_game(screen: pygame.Surface, game: Game,
         danger = bottom >= danger_y
         draw_brick(screen, brick, small_font, boff, danger, game.game_time,
                    game.freeze_timer > 0, brick.acid_t > 0,
-                   game.reverse_timer > 0)
+                   game.reverse_timer > 0, brick.stun > 0)
 
     # Field pickups
     for pu in game.pickups:
@@ -293,6 +299,15 @@ def draw_game(screen: pygame.Surface, game: Game,
                            (acid_r, acid_r), acid_r)
         screen.blit(surf, (ax - acid_r, ay - acid_r))
         pygame.draw.circle(screen, MORTAR_ACID_COLOR, (ax, ay), acid_r, 1)
+
+    # Placed tar zones (stationary, dark sticky circle)
+    for tar in game.placed_tars:
+        tx, ty = int(tar["x"]), int(tar["y"])
+        tar_r = int(TAR_RADIUS_CELLS * CELL_SIZE)
+        surf = pygame.Surface((tar_r * 2, tar_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (60, 50, 35, 90), (tar_r, tar_r), tar_r)
+        screen.blit(surf, (tx - tar_r, ty - tar_r))
+        pygame.draw.circle(screen, TAR_COLOR, (tx, ty), tar_r, 1)
 
     # Placed walls (horizontal barrier line)
     for wall in game.placed_walls:
@@ -450,20 +465,23 @@ def draw_game(screen: pygame.Surface, game: Game,
             pygame.draw.rect(screen, (255, 230, 150),
                              (bx - 2, bullet_cy - 10, 6, 5), border_radius=2)
 
-    # Ammo count + modifier indicator
+    # Ammo count + volley indicator
     ammo_label = f"x{available}"
-    if game.fireball_charges > 0:
-        ammo_label += f"  F:{game.fireball_charges}"
-    if game.homing_charges > 0:
-        ammo_label += f"  H:{game.homing_charges}"
+    volley = game.volley_size()
+    if volley > 1 and available > 0:
+        ammo_label += f" ({volley}x)"
     count_color = (FIREBALL_COLOR if game.fireball_charges > 0
                    else HOMING_COLOR if game.homing_charges > 0
                    else AMMO_COLOR)
     count_txt = font.render(ammo_label, True, count_color)
     screen.blit(count_txt, (12 + 5 * 16 + 6, bullet_cy - 12))
 
-    # In-flight / reloading indicator
+    # Charges / in-flight / reloading indicator
     sub_parts: list[str] = []
+    if game.fireball_charges > 0:
+        sub_parts.append(f"F:{game.fireball_charges}")
+    if game.homing_charges > 0:
+        sub_parts.append(f"H:{game.homing_charges}")
     if in_flight > 0:
         sub_parts.append(f"{in_flight} flying")
     if game.gun_reloading > 0:
@@ -475,8 +493,8 @@ def draw_game(screen: pygame.Surface, game: Game,
         screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 6))
 
     # Mortar ammo — one slot per type (right side), ring marks selection
-    slot_w = 58
-    mortar_start_x = WIDTH - len(MORTAR_TYPES) * slot_w + 14
+    slot_w = 50
+    mortar_start_x = WIDTH - len(MORTAR_TYPES) * slot_w + 12
     for i, mtype in enumerate(MORTAR_TYPES):
         mx = mortar_start_x + i * slot_w
         count = game.mortar_ammo[mtype]
@@ -490,7 +508,7 @@ def draw_game(screen: pygame.Surface, game: Game,
         screen.blit(t, t.get_rect(center=(mx, bullet_cy)))
         cnt_color = TEXT_COLOR if count > 0 else (100, 100, 120)
         cnt = small_font.render(f"x{count}", True, cnt_color)
-        screen.blit(cnt, (mx + 15, bullet_cy - 8))
+        screen.blit(cnt, (mx + 14, bullet_cy - 8))
 
     # --- Pause overlay ---
     if game.phase == "paused":
@@ -585,14 +603,14 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
         nonlocal y
         t = small_font.render(label, True, header_color)
         screen.blit(t, (24, y))
-        y += 30
+        y += 28
 
     def row(icon_fn, desc: str):
         nonlocal y
         icon_fn(y)
         t = small_font.render(desc, True, text_color)
         screen.blit(t, (text_x, y - 9))
-        y += 30
+        y += 28
 
     def pickup(ptype):
         return lambda ry: draw_pickup_icon(screen, small_font, ptype,
@@ -603,27 +621,25 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(pickup("mine"), f"Mine — +1 mortar mine (wave {UNLOCK['mines']}+)")
     row(pickup("wall"), f"Wall — +1 mortar wall (wave {UNLOCK['wall']}+)")
     row(pickup("bomb"), f"Bomb — +1 mortar bomb (wave {UNLOCK['bombs']}+)")
+    row(pickup("tar"), f"Tar — +1 mortar tar (wave {UNLOCK['tar']}+)")
     row(pickup("fireball"),
         f"Fireball — next 5 shots pierce (wave {UNLOCK['fireball']}+)")
     row(pickup("acid"), f"Acid — +1 mortar acid (wave {UNLOCK['acid']}+)")
     row(pickup("homing"),
         f"Homing — next 5 shots steer (wave {UNLOCK['homing']}+)")
 
-    y += 10
+    y += 8
     header("AOE — shoot it, or it fires when a brick touches it")
     row(lambda ry: draw_freeze_icon(screen, icon_x, ry),
         f"Freeze — stops advance 5s (wave {UNLOCK['freeze']}+)")
     row(lambda ry: draw_reverse_icon(screen, icon_x, ry),
         f"Reverse — bricks retreat 3s (wave {UNLOCK['reverse']}+)")
     row(lambda ry: draw_lightning_icon(screen, icon_x, ry),
-        f"Lightning — strikes 6 random bricks (wave {UNLOCK['lightning']}+)")
+        f"Lightning — zaps + stuns 6 bricks 1s (wave {UNLOCK['lightning']}+)")
     row(lambda ry: draw_skull_icon(screen, icon_x, ry),
-        "Skull — halves brick HP/shields AND your ammo")
-    t = small_font.render("(appears in the bottom rows after 10 minutes)",
-                          True, (130, 130, 160))
-    screen.blit(t, (text_x, y - 6))
-    y += 34
+        "Skull — halves brick HP/shields + ammo (10 min+)")
 
+    y += 8
     header("MORTAR — right click, targets the crosshair")
     row(lambda ry: draw_pickup_icon(screen, small_font, "bomb", icon_x, ry),
         "Bomb — area damage, chains to other bombs")
@@ -633,6 +649,8 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
         "Acid — damage zone, ticks for 5s")
     row(lambda ry: draw_pickup_icon(screen, small_font, "wall", icon_x, ry),
         "Wall — barrier that holds bricks until overloaded")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "tar", icon_x, ry),
+        "Tar — zone that halves brick speed for 8s")
 
     hint = small_font.render("Click or Esc to return", True, (180, 180, 180))
     screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 30)))

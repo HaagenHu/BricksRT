@@ -31,7 +31,11 @@ Fires single projectiles from the bottom center. Rapid fire with cooldown.
 | Homing | Gently steers toward nearest brick | Pickup |
 
 - Ammo is shared pool (like ball count in Bricks)
+- Volley scaling: surplus ammo converts to shots per trigger in a
+  small spread — 2 at 15+ ammo, 3 at 30+, 4 at 45+. Keeps the pool
+  circulating instead of accumulating dead inventory
 - Fireball/homing are temporary upgrades applied to next N shots
+  (one charge per volley projectile)
 - Projectiles still bounce off walls and ceiling
 - Projectile exits at bottom = ammo returns after a short reload delay,
   and the gun drifts toward the exit point
@@ -42,11 +46,12 @@ Fires arcing projectile to crosshair position. Slower cooldown (0.6s), limited a
 | Ammo Type | Effect | Source |
 |-----------|--------|--------|
 | Bomb | Explodes at target, area damage | Pickup |
-| Acid | Area DoT at target position (10s, radius 3) | Pickup |
+| Acid | Area DoT at target position | Pickup |
 | Wall | Places energy barrier blocking brick column | Pickup |
+| Tar | Zone that halves brick advance speed for 8s | Pickup (wave 20+) |
 
 - Mortar ammo is collected per type, not infinite
-- Type is selected with scroll wheel or number keys 1-4; firing with an
+- Type is selected with scroll wheel or number keys 1-5; firing with an
   empty selection falls back to the first type with ammo
 - Mortar fires TO the crosshair position (targeted, not bouncing)
 - Explosion/effect happens at impact point
@@ -61,7 +66,7 @@ touches it).
 |------|--------|--------|
 | Freeze | Stops all brick advancement for 5 seconds | Pickup |
 | Reverse | Bricks move upward for 3 seconds | Pickup |
-| Lightning | Chain strikes on 6 random bricks (wave dmg each) | Pickup (wave 20+) |
+| Lightning | Zaps 6 random bricks (wave/5 dmg) and stuns them 1s | Pickup (wave 45+) |
 | Skull | Halves brick HP/shields AND total gun ammo (incl. in-flight) | Spawns in bottom rows every 5 min after 10 min |
 
 ---
@@ -152,7 +157,7 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 | Left click | Fire gun |
 | Left hold | Rapid fire gun |
 | Right click | Fire mortar at crosshair |
-| Scroll / 1-4 | Select mortar ammo type |
+| Scroll / 1-5 | Select mortar ammo type |
 | Space | Pause |
 | Escape | Menu (saves highscore) |
 

@@ -7,8 +7,8 @@ Real-time brick breaker with gun and mortar mechanics. Based on [Bricks](https:/
 Bricks advance slowly in real-time. Player has a crosshair and two weapons:
 
 - **Gun (Left mouse):** Fires projectiles — Fireball, Homing
-- **Mortar (Right mouse):** Launches area weapons — Bomb, Mine, Acid, Wall
-  (select type with scroll wheel or 1-4)
+- **Mortar (Right mouse):** Launches area weapons — Bomb, Mine, Acid, Wall,
+  Tar (select type with scroll wheel or 1-5)
 - **AoE (Pickup):** Field effects — Freeze, Reverse, Lightning, Skull
 
 ## Status

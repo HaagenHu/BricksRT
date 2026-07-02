@@ -110,6 +110,41 @@ def test_new_best_flag_tie_vs_beat():
     assert gm2.new_best
 
 
+def test_volley_scales_with_ammo():
+    gm = _fresh_game()
+    gm.bricks.clear()
+    gm.update_aim((240, 100))
+    for ammo, expected in [(1, 1), (14, 1), (15, 2), (29, 2),
+                           (30, 3), (45, 4), (100, 4)]:
+        gm.projectiles.clear()
+        gm.gun_ammo = ammo
+        gm.gun_cooldown = 0
+        assert gm.fire_gun()
+        assert len(gm.projectiles) == expected, f"ammo {ammo}"
+        assert gm.gun_ammo == ammo - expected
+    # Spread is symmetric around the aim angle
+    import math
+    angles = sorted(math.atan2(p.vel.y, p.vel.x) for p in gm.projectiles)
+    assert abs(sum(angles) / len(angles) - gm.aim_angle) < 1e-6
+    step = math.radians(g.VOLLEY_SPREAD_DEG)
+    for a1, a2 in zip(angles, angles[1:]):
+        assert abs((a2 - a1) - step) < 1e-6
+
+
+def test_volley_consumes_charges_per_shot():
+    gm = _fresh_game()
+    gm.bricks.clear()
+    gm.update_aim((240, 100))
+    gm.gun_ammo = 30  # 3-shot volley
+    gm.gun_cooldown = 0
+    gm.fireball_charges = 1
+    gm.homing_charges = 1
+    assert gm.fire_gun()
+    kinds = [(p.fireball, p.homing) for p in gm.projectiles]
+    assert kinds == [(True, False), (False, True), (False, False)]
+    assert gm.fireball_charges == 0 and gm.homing_charges == 0
+
+
 def test_mortar_cooldown_and_selection():
     gm = _fresh_game()
     gm.mortar_ammo["bomb"] = 2
@@ -131,6 +166,29 @@ def test_mortar_cooldown_and_selection():
     assert not gm.fire_mortar()
 
 
+def test_mortar_highlight_follows_ammo():
+    gm = _fresh_game()
+    idx = {t: i for i, t in enumerate(g.MORTAR_TYPES)}
+    # Firing the last shell moves the highlight to the next stocked type
+    gm.mortar_ammo = {t: 0 for t in g.MORTAR_TYPES}
+    gm.mortar_ammo.update({"bomb": 1, "acid": 2})
+    gm.select_mortar(idx["bomb"])
+    assert gm.fire_mortar()
+    assert gm.mortar_sel == idx["acid"]
+    # Firing with an empty selection syncs the highlight to the fallback
+    gm.mortar_cooldown = 0
+    gm.select_mortar(idx["wall"])
+    assert gm.fire_mortar()  # falls back to acid
+    assert gm.mortar_shells[-1]["type"] == "acid"
+    assert gm.mortar_sel == idx["acid"]
+    # Everything empty: selection stays put
+    gm.mortar_cooldown = 0
+    assert gm.fire_mortar()  # last acid, nothing left to advance to
+    assert gm.mortar_sel == idx["acid"]
+    gm.mortar_cooldown = 0
+    assert not gm.fire_mortar()
+
+
 def test_cycle_mortar_wraps():
     gm = _fresh_game()
     gm.mortar_sel = 0
@@ -146,6 +204,7 @@ def test_pickup_collection_effects():
     cases = [
         ("ammo", lambda: gm.gun_ammo),
         ("bomb", lambda: gm.mortar_ammo["bomb"]),
+        ("tar", lambda: gm.mortar_ammo["tar"]),
         ("fireball", lambda: gm.fireball_charges),
         ("homing", lambda: gm.homing_charges),
     ]
@@ -157,6 +216,79 @@ def test_pickup_collection_effects():
         gm._collide_pickups(p)
         assert getter() > before, f"{ptype} pickup had no effect"
         assert not gm.pickups, f"{ptype} pickup not removed"
+
+
+def test_tar_slows_bricks_in_zone():
+    gm = _fresh_game(wave=6)
+    gm.bricks = [
+        Brick(col=0, row=3, hp=5),  # inside the tar zone
+        Brick(col=6, row=3, hp=5),  # far away, full speed
+    ]
+    tarred, free = gm.bricks
+    rect = g.cell_rect(0, 3, "square", gm.brick_offset)
+    gm.placed_tars = [{"x": float(rect.centerx), "y": float(rect.centery),
+                       "timer": 100.0}]
+
+    def top_of(b):
+        return g.GRID_TOP + b.row * g.CELL_SIZE + gm._brick_off(b)
+
+    t_before, f_before = top_of(tarred), top_of(free)
+    for _ in range(60):  # 1 second
+        gm.update(1 / 60)
+    t_moved = top_of(tarred) - t_before
+    f_moved = top_of(free) - f_before
+    assert f_moved > 1
+    assert abs(t_moved - f_moved * g.TAR_SLOW) < 0.5, \
+        f"tarred moved {t_moved:.2f}, free {f_moved:.2f}"
+
+    # Stun inside tar: full stop, not 150%
+    tarred.stun = 100.0
+    t_before = top_of(tarred)
+    for _ in range(30):
+        gm.update(1 / 60)
+    assert abs(top_of(tarred) - t_before) < 1e-6
+
+    # Zone expires
+    gm.placed_tars[0]["timer"] = 0.001
+    gm.update(1 / 60)
+    assert not gm.placed_tars
+
+
+def test_tar_mortar_lands_as_zone():
+    gm = _fresh_game(wave=10)
+    gm.mortar_ammo["tar"] = 1
+    gm.select_mortar(g.MORTAR_TYPES.index("tar"))
+    gm.crosshair = (240, 300)
+    assert gm.fire_mortar()
+    shell = gm.mortar_shells[-1]
+    assert shell["type"] == "tar"
+    gm._land_mortar(shell)
+    assert len(gm.placed_tars) == 1
+    assert gm.placed_tars[0]["timer"] == g.TAR_DURATION
+
+
+def test_bricks_stack_on_stunned_brick():
+    gm = _fresh_game(wave=5)
+    gm.bricks = [
+        Brick(col=0, row=3, hp=5, stun=10.0),  # stunned, stands still
+        Brick(col=0, row=2, hp=5),             # directly above: must stop
+        Brick(col=4, row=2, hp=5),             # other column: keeps moving
+    ]
+    stunned, above, free = gm.bricks
+
+    def top_of(b):
+        return g.GRID_TOP + b.row * g.CELL_SIZE + gm._brick_off(b)
+
+    free_top_before = top_of(free)
+    for _ in range(60):  # 1 second
+        gm.update(1 / 60)
+    assert stunned.lag > 1
+    # The brick above sits flush on the stunned brick — no overlap
+    above_bottom = top_of(above) + g.CELL_SIZE
+    assert abs(above_bottom - top_of(stunned)) < 0.5
+    assert above.held > 0
+    # Unrelated column advanced normally
+    assert top_of(free) > free_top_before + 1
 
 
 def test_wall_blocking_pins_and_stacks():
@@ -205,14 +337,16 @@ def test_advance_rows_moves_bricks_and_pickups():
     assert gm.wave == wave_before + 1  # advancing spawns a wave
 
 
-def test_lightning_strikes_random_bricks():
+def test_lightning_zaps_and_stuns():
     random.seed(11)
     gm = _fresh_game(wave=20)
     gm.bricks = [Brick(col=c, row=2, hp=100) for c in range(8)]
     gm._trigger_lightning(240.0, 400.0)
     struck = [b for b in gm.bricks if b.hp < 100]
     assert len(struck) == g.LIGHTNING_STRIKES
-    assert all(b.hp == 100 - gm.wave for b in struck)
+    assert all(b.hp == 100 - gm.wave // 5 for b in struck)
+    assert all(b.stun == g.LIGHTNING_STUN for b in struck)
+    assert all(b.stun == 0 for b in gm.bricks if b.hp == 100)
     assert len(gm.lightning_bolts) == 1
     # Bolt path visits trigger point + one center per strike (jagged between)
     assert len(gm.lightning_bolts[0]["points"]) > g.LIGHTNING_STRIKES
@@ -222,6 +356,32 @@ def test_lightning_strikes_random_bricks():
     gm2.bricks = [Brick(col=0, row=2, hp=1), Brick(col=1, row=2, hp=1)]
     gm2._trigger_lightning(240.0, 400.0)
     assert not gm2.bricks
+
+
+def test_stunned_brick_stops_advancing():
+    gm = _fresh_game(wave=5)
+    gm.bricks = [
+        Brick(col=0, row=2, hp=5, stun=10.0),  # stunned (long, for the test)
+        Brick(col=5, row=2, hp=5),             # moving normally
+    ]
+    stunned, normal = gm.bricks
+    y_stunned = g.GRID_TOP + stunned.row * g.CELL_SIZE + gm._brick_off(stunned)
+    y_normal = g.GRID_TOP + normal.row * g.CELL_SIZE + gm._brick_off(normal)
+    for _ in range(30):  # 0.5s
+        gm.update(1 / 60)
+    y_stunned2 = g.GRID_TOP + stunned.row * g.CELL_SIZE + gm._brick_off(stunned)
+    y_normal2 = g.GRID_TOP + normal.row * g.CELL_SIZE + gm._brick_off(normal)
+    assert abs(y_stunned2 - y_stunned) < 1e-6, "stunned brick moved"
+    assert y_normal2 > y_normal + 1, "normal brick did not move"
+    # Stun expires and the brick keeps its lag but resumes moving
+    stunned.stun = 0.0
+    lag_before = stunned.lag
+    y_before = g.GRID_TOP + stunned.row * g.CELL_SIZE + gm._brick_off(stunned)
+    for _ in range(30):
+        gm.update(1 / 60)
+    assert stunned.lag == lag_before
+    y_after = g.GRID_TOP + stunned.row * g.CELL_SIZE + gm._brick_off(stunned)
+    assert y_after > y_before + 1, "brick did not resume after stun"
 
 
 def test_skull_halves_hp_shields_and_ammo():

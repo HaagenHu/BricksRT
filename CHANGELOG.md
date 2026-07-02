@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.1 — Lightning rebalance, volley scaling (2026-07-02)
+
+- Pickup unlocks respread: one new type every 5th wave — mines 5,
+  wall 10, bombs 15, tar 20, fireball 25, acid 30, freeze 35,
+  reverse 40, lightning 45, homing 50 (previously bunched in waves 3-20)
+- **Tar mortar** (wave 20+): fifth mortar type — lands as a sticky zone
+  that halves brick advance speed inside it for 8s; stacks bricks
+  behind slowed ones; synergizes with acid (more ticks in the zone)
+- Volley scaling: big ammo pools fire multiple shots per trigger in a
+  small spread (2 at 15+, 3 at 30+, 4 at 45+ ammo) — surplus ammo now
+  converts to bounce volume instead of sitting idle; HUD shows the
+  multiplier next to the ammo count
+
+- Lightning nerfed: strikes now deal light damage (wave/5 instead of
+  full wave) and stun struck bricks for 1s — stunned bricks stop
+  advancing (yellow frame) while the rest of the field keeps moving
+- Bricks catching up with a stunned brick stack on top of it (same
+  behavior as stacking on wall-held bricks) instead of overlapping
+- Mortar HUD highlight follows the ammo: it moves to the next stocked
+  type when the selected one runs out, and syncs when firing falls
+  back from an empty selection
+
 ## v0.3.0 — Lightning, Skull, Merging (2026-07-02)
 
 - **Lightning** (pickup, wave 20+): chain-strikes 6 random bricks for
