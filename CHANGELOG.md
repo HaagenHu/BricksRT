@@ -1,5 +1,90 @@
 # Changelog
 
+## v0.4.0 — Unified ammo, panic buttons, juice (2026-07-02)
+
+### Unified ammo system
+
+- **One shared ammo inventory** replaces separate mortar ammo and gun
+  charges: each pickup gives 1 unit; a unit fires one mortar round
+  (right click) OR loads the gun with 5 special bullets (R, queued in
+  firing order — repeat to stack). Scroll / keys 1-6 select the type
+- Dual-use effects, matched by theme: Wall = barrier / full 2s stop on
+  the hit brick; Bomb = area blast / piercing fire bullet (the old
+  fireball); Tar = slow zone / +15% slow per hit (stacks to a stop, 3s
+  from last hit); Acid = damage zone / melt DoT (1 dmg/s, 3s from last
+  hit); Homing = rocket that flies to the brick nearest the gun and
+  explodes / steering shots; Mine = contact trap / sticky charge that
+  rides the first brick hit and blows after 1.5s (the ball bounces
+  on) — every type is dual-use
+- The center shot of each volley fires the next queued special bullet,
+  straight at the aim point; the rest of the volley stays normal
+- Fireball and tar-shot pickups are gone (folded into bomb and tar);
+  the HUD shows six inventory slots and the gun's queued load
+- **Panic gun** (W): loads one unit of every stocked gun-capable type
+  into the gun queue at once — the mortar panic stays on Q
+- Shields have counterplay beyond from-below bounces: explosions
+  (bomb/mine/rocket) halve them, acid melts them (zone and DoT ticks
+  strip shield points before hp), and fire bullets chip 1 shield per
+  pass-through
+
+### Gameplay
+
+- New brick rows slide down from behind the top HUD (0.2s) instead of
+  popping in; killed bricks shrink out over 0.12s in their own shape
+  and color
+- Starry background: three parallax layers of dim stars drift slowly
+  down the play field (frozen while paused) and across the menu and
+  help screens
+- 5% of spawning bricks have double HP (stacks with the wide-brick
+  doubling)
+- Shots now launch from the gun's barrel tip instead of its base
+- **Panic button** (Q): fires one shell of each stocked mortar type
+  (walls excluded) spread along the lowest occupied brick row,
+  bypassing the mortar cooldown; mines land a cell below the row; the
+  crosshair (and mouse) snap to the biggest brick on that row
+- Red danger gradient over the last three rows fades in as the lowest
+  brick approaches the death line (completes ambient depth)
+- Skull hit feedback: each brick flashes purple-white for 0.3s as the
+  ring sweeps over it, and the gun-ammo count pulses purple for 1.5s
+  after the ammo cut
+- Lightning stun doubled to 2s
+- Clearing the board drops a random unlocked pickup in the upper rows
+  as a reward
+- Crosshair is now azure blue with a dark outline instead of thin gray
+  lines — readable over bright bricks, explosions, and text
+- Recolored near-duplicate pickups: ammo is gold (matches the HUD
+  ammo bullets, no longer green like homing), mines are steel with a
+  red ring (no longer red like bombs) — placed mines match
+- Help screen: one AMMO list with each type's mortar and gun effect
+  plus unlock wave on a single line, and the AoE legend
+- Fixed bricks jumping forward when a mortar wall broke or expired:
+  the wall's hold-back now converts to lag, so bricks resume advancing
+  from where they stopped at the wall
+- Skull reset is now permanent on the supply side too: each skull adds
+  half the current spawn HP to a lasting deduction on new-brick HP
+  (skull at wave 110 → new bricks spawn at wave − 55; stacks per
+  skull), applied to wave spawns and blocked-column HP alike
+- Menu controls list updated (1-6, R, panic keys) — it still said 1-4
+- Grazing shots no longer slide along the screen borders: bounces off
+  the side walls and ceiling leave at a minimum 8° angle
+- Fixed shots sticking to a mortar wall: a grazing hit used to
+  re-bounce every frame (flickering across the line and chipping the
+  wall's capacity each frame); now it bounces once, away, at the same
+  minimum angle
+- DESIGN.md: added suggestion sections for new pickups, sound design,
+  and graphics improvements
+- Volley size locks while the trigger is held: the burst keeps its
+  shot count until you release or the pool empties, instead of
+  stepping down mid-burst as ammo drains — but it can still step up
+  if a pickup grows the pool mid-fire
+- Fixed hexagon shield drawn along the top edges instead of the bottom
+- Fixed stale volley lock: a skull emptying the pool mid-hold no longer
+  leaves the old burst size active when reloaded shots return
+- Fixed wave-70+ merge replaying the slide-in on the whole tall brick,
+  which made the absorbed on-screen brick visibly jump up a cell
+- Fixed death ghosts of bricks killed during the slide-in appearing at
+  the logical cell (up to one cell below where the brick was drawn)
+
 ## v0.3.2 — Mortar order (2026-07-02)
 
 - Mortar types reordered to match unlock sequence (mine, wall, bomb,

@@ -49,7 +49,10 @@ MAX_ROWS = (GRID_BOTTOM - GRID_TOP) // CELL_SIZE
 
 PROJECTILE_RADIUS = 5
 PROJECTILE_SPEED = 600  # px per second
+MIN_BOUNCE_ANGLE = 8  # degrees — min rebound off walls/ceiling so
+                      # grazing shots don't slide along the border
 GUN_COOLDOWN = 0.12  # seconds between shots
+GUN_BARREL_LEN = 40  # px — shots launch from the barrel tip
 GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
 STARTING_GUN_AMMO = 1
 AMMO_PER_PICKUP = 1
@@ -62,6 +65,9 @@ VOLLEY_SPREAD_DEG = 3.0  # degrees between adjacent volley shots
 
 ADVANCE_SPEED_BASE = 6.0   # px/sec at start
 ADVANCE_SPEED_MAX = 25.0   # cap
+
+SPAWN_ANIM_TIME = 0.2   # seconds a new row slides in from behind the HUD
+DEATH_ANIM_TIME = 0.12  # seconds a killed brick shrinks out
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -76,11 +82,15 @@ TAR_SLOW = 0.5      # fraction of advance speed removed inside the zone
 FREEZE_DURATION = 5.0  # seconds
 REVERSE_DURATION = 3.0  # seconds
 
-FIREBALL_CHARGES = 5    # shots as fireball per pickup
-HOMING_CHARGES = 5      # shots as homing per pickup
+GUN_LOAD_SHOTS = 5      # special bullets per ammo unit loaded (R key)
+TARSHOT_SLOW = 0.15     # slow added per tar-bullet hit (stacks to 1.0)
+TARSHOT_TIME = 3.0      # slow lasts this long after the LAST hit
+ACIDSHOT_DOT = 3.0      # seconds of 1 dmg/s after an acid-bullet hit
+WALLSHOT_STUN = 2.0     # wall bullet: full stop on the hit brick
+STICKY_FUSE = 1.5       # mine bullet: seconds until the charge blows
 
 LIGHTNING_STRIKES = 6      # bricks hit per lightning trigger
-LIGHTNING_STUN = 1.0       # seconds a struck brick stops advancing
+LIGHTNING_STUN = 2.0       # seconds a struck brick stops advancing
 LIGHTNING_BOLT_TTL = 0.35  # seconds a bolt stays visible
 
 SKULL_START = 600.0     # seconds of game time before skulls appear
@@ -88,20 +98,37 @@ SKULL_INTERVAL = 300.0  # seconds between skull spawns
 SKULL_ROWS = 4          # skulls spawn only in the bottom N usable rows
 
 MERGE_CHANCE = 0.25  # chance a spawning square fuses with the one below
+DOUBLE_HP_CHANCE = 0.05  # chance a spawning brick has double HP
 
-# Ordered by unlock wave — HUD slots and keys 1-5 follow this order
-MORTAR_TYPES = ["mine", "wall", "bomb", "tar", "acid"]
+BRICK_FLASH_TIME = 0.3  # per-brick flash as the skull ring sweeps it
+AMMO_FLASH_TIME = 1.5   # gun-ammo HUD pulse after the skull's ammo cut
+
+# One shared ammo inventory: each unit fires one mortar round OR loads
+# the gun with GUN_LOAD_SHOTS special bullets (types permitting).
+# Ordered by unlock wave — HUD slots and keys 1-6 follow this order.
+AMMO_TYPES = ["mine", "wall", "bomb", "tar", "acid", "homing"]
+MORTAR_CAPABLE = {"mine", "wall", "bomb", "tar", "acid", "homing"}
+GUN_CAPABLE = {"mine", "wall", "bomb", "tar", "acid", "homing"}
 MORTAR_COOLDOWN = 0.6  # seconds between mortar shots
 
 # Unlock thresholds (wave number)
 UNLOCK = {
-    # Pickups: one new type every 10th wave
-    "mines": 10, "wall": 20, "bombs": 30, "tar": 40, "fireball": 50,
-    "acid": 60, "freeze": 70, "reverse": 80, "lightning": 90, "homing": 100,
+    # Pickups: one new type every 10th wave (50 freed by the fireball
+    # merge into bomb)
+    "mines": 10, "wall": 20, "bombs": 30, "tar": 40,
+    "acid": 60, "freeze": 70, "reverse": 80, "lightning": 90,
+    "homing": 100,
     # Brick shapes and properties
     "round": 15, "diamond": 15,
     "hexagon": 30, "trapezoid": 30, "wide": 30,
     "triangle": 50, "shields": 60, "merging": 70,
+}
+
+# Unlock wave per collectible pickup type (0 = always available)
+PICKUP_UNLOCK = {
+    "ammo": 0, "mine": UNLOCK["mines"], "wall": UNLOCK["wall"],
+    "bomb": UNLOCK["bombs"], "tar": UNLOCK["tar"], "acid": UNLOCK["acid"],
+    "homing": UNLOCK["homing"],
 }
 
 
@@ -147,6 +174,12 @@ class Brick:
     acid_t: float = 0.0  # seconds of acid tint remaining
     stun: float = 0.0    # seconds of lightning stun remaining
     lag: float = 0.0     # px behind the global offset (from stuns)
+    spawn_t: float = 0.0  # slide-in animation remaining (visual only)
+    flash: float = 0.0   # skull-sweep flash remaining (visual only)
+    slow_pct: float = 0.0  # tar-bullet slow, 0..1 (0.15 per hit)
+    slow_t: float = 0.0    # seconds of tar-bullet slow remaining
+    acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
+    acid_tick: float = 0.0  # DoT accumulator toward the next damage
 
     def cells(self) -> list[tuple[int, int]]:
         """Grid cells occupied by this brick."""
@@ -178,6 +211,23 @@ class Projectile:
         self.fireball = False
         self.homing = False
         self.homing_timer = 0.0
+        self.tar = False
+        self.acid = False
+        self.wallshot = False
+        self.mine = False
+
+    def _min_rebound(self, axis: str, direction: float):
+        """Force the rebound at least MIN_BOUNCE_ANGLE off the border,
+        keeping speed, so grazing shots don't hug the wall."""
+        speed = self.vel.length()
+        min_n = speed * math.sin(math.radians(MIN_BOUNCE_ANGLE))
+        rest = math.sqrt(max(0.0, speed * speed - min_n * min_n))
+        if axis == "x" and abs(self.vel.x) < min_n:
+            self.vel.x = direction * min_n
+            self.vel.y = math.copysign(rest, self.vel.y)
+        elif axis == "y" and abs(self.vel.y) < min_n:
+            self.vel.y = direction * min_n
+            self.vel.x = math.copysign(rest, self.vel.x)
 
     def update(self, dt: float):
         if not self.alive:
@@ -188,16 +238,19 @@ class Projectile:
         if self.pos.x - PROJECTILE_RADIUS < 0:
             self.pos.x = PROJECTILE_RADIUS
             self.vel.x = abs(self.vel.x)
+            self._min_rebound("x", 1)
             self.border_hits += 1
         elif self.pos.x + PROJECTILE_RADIUS > WIDTH:
             self.pos.x = WIDTH - PROJECTILE_RADIUS
             self.vel.x = -abs(self.vel.x)
+            self._min_rebound("x", -1)
             self.border_hits += 1
 
         # Ceiling bounce
         if self.pos.y - PROJECTILE_RADIUS < GRID_TOP:
             self.pos.y = GRID_TOP + PROJECTILE_RADIUS
             self.vel.y = abs(self.vel.y)
+            self._min_rebound("y", 1)
             self.border_hits += 1
 
         # Floor: exit and return ammo
@@ -269,20 +322,24 @@ class Game:
         self.gun_reloading = 0  # ammo pending reload
         self.gun_reload_timer = 0.0
         self.ammo_debt = 0  # skull penalty: eats returning shots
+        self.ammo_flash = 0.0  # HUD pulse after the skull's ammo cut
+        self.skull_hp_cut = 0  # permanent deduction on new-brick HP
+        self.volley_lock: int | None = None  # size frozen while firing
         self.projectiles: list[Projectile] = []
 
-        # Mortar ammo — count per type, player selects with scroll / 1-4
-        self.mortar_ammo: dict[str, int] = {t: 0 for t in MORTAR_TYPES}
-        self.mortar_sel = 0  # index into MORTAR_TYPES
+        # Shared ammo inventory — one count per type; a unit fires one
+        # mortar round or loads the gun (scroll / keys 1-6 select)
+        self.ammo_inv: dict[str, int] = {t: 0 for t in AMMO_TYPES}
+        self.ammo_sel = 0  # index into AMMO_TYPES
         self.mortar_cooldown = 0.0
-
-        # Gun ammo modifiers
-        self.fireball_charges = 0  # next N shots are fireballs
-        self.homing_charges = 0    # next N shots are homing
+        # Special bullets queued in the gun, fired center-shot first;
+        # each entry is one bullet of that type
+        self.gun_queue: list[str] = []
+        # Sticky charges riding bricks: {brick, timer}
+        self.sticky_charges: list[dict] = []
 
         # Field pickups (advance with bricks, ball hit to collect):
-        # {col, row, type} — type: ammo | bomb | mine | acid | wall |
-        # fireball | homing
+        # {col, row, type} — "ammo" or any AMMO_TYPES entry
         self.pickups: list[dict] = []
 
         # Placed items from mortar fire (stationary)
@@ -305,6 +362,9 @@ class Game:
 
         # Visual effects
         self.explosions: list[dict] = []
+        # Shrinking ghosts of killed bricks: {shape, tri_dir, cx, cy,
+        # hp, timer}
+        self.dying_bricks: list[dict] = []
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -338,6 +398,7 @@ class Game:
         if self.phase != "playing":
             return
 
+        had_bricks = bool(self.bricks)
         self.game_time += dt
 
         # Freeze countdown
@@ -360,10 +421,19 @@ class Game:
             if self.reverse_wave["height"] >= self.reverse_wave["max_height"]:
                 self.reverse_wave = None
 
-        # Skull wave animation
+        # Skull wave animation — flash each brick as the ring sweeps it
         if self.skull_wave:
-            self.skull_wave["radius"] += self.skull_wave["speed"] * dt
-            if self.skull_wave["radius"] >= self.skull_wave["max_radius"]:
+            w = self.skull_wave
+            prev_r = w["radius"]
+            w["radius"] += w["speed"] * dt
+            for b in self.bricks:
+                rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+                d = math.hypot(rect.centerx - w["x"], rect.centery - w["y"])
+                # Inclusive lower bound so the brick at the trigger
+                # point (d == 0) flashes on the first frame
+                if prev_r <= d <= w["radius"]:
+                    b.flash = BRICK_FLASH_TIME
+            if w["radius"] >= w["max_radius"]:
                 self.skull_wave = None
 
         # Skulls spawn at intervals late in the game
@@ -405,8 +475,16 @@ class Game:
                     if b.stun > 0:
                         b.stun -= dt
                         slow = 1.0
-                    elif self.placed_tars and self._in_tar(b):
-                        slow = TAR_SLOW
+                    else:
+                        if self.placed_tars and self._in_tar(b):
+                            slow = TAR_SLOW
+                        if b.slow_t > 0:
+                            # Tar-bullet slow: strongest effect wins,
+                            # stacks expire 3s after the last hit
+                            b.slow_t = max(0.0, b.slow_t - dt)
+                            slow = max(slow, b.slow_pct)
+                            if b.slow_t <= 0:
+                                b.slow_pct = 0.0
                     if slow > 0 and b.held <= 0:
                         b.lag += self.advance_speed * slow * dt
                 self.brick_offset += self.advance_speed * dt
@@ -479,12 +557,43 @@ class Game:
         # Mines: explode when any brick overlaps them
         self._check_mines()
 
+        # Sticky charges: fuse down, then blow at the host brick's
+        # position (its last known spot if it already died)
+        for ch in list(self.sticky_charges):
+            ch["timer"] -= dt
+            if ch["timer"] <= 0:
+                self.sticky_charges.remove(ch)
+                b = ch["brick"]
+                rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+                self._explode(rect.centerx, rect.centery)
+
         # AoE pickups also trigger on brick contact
         for placed, trigger in self._placed_aoe():
             self._check_placed_aoe_brick(placed, trigger)
 
         # Acid zones: tick damage on nearby bricks
         self._update_acids(dt)
+
+        # Acid-bullet DoT: 1 dmg per second while active
+        dissolved: list[Brick] = []
+        for b in self.bricks:
+            if b.acid_dot > 0:
+                b.acid_dot = max(0.0, b.acid_dot - dt)
+                b.acid_tick += dt
+                while b.acid_tick >= 1.0:
+                    b.acid_tick -= 1.0
+                    if b.shield > 0:
+                        b.shield -= 1  # melts armor before flesh
+                        continue
+                    b.hp -= 1
+                    if b.hp <= 0:
+                        self._kill_brick(b)
+                        dissolved.append(b)
+                        break
+            elif b.acid_tick:
+                b.acid_tick = 0.0
+        if dissolved:
+            self.bricks = [b for b in self.bricks if b not in dissolved]
 
         # Tar zones: expire
         for tar in self.placed_tars:
@@ -508,8 +617,21 @@ class Game:
         if dead_walls:
             self.placed_walls = [w for w in self.placed_walls
                                  if w not in dead_walls]
+            # Convert the hold-back into lag so bricks resume from where
+            # they stopped at the wall instead of jumping forward
             for b in self.bricks:
-                b.held = 0.0
+                if b.held > 0:
+                    b.lag += b.held
+                    b.held = 0.0
+
+        # Homing rockets track their target brick while flying
+        for shell in self.mortar_shells:
+            tb = shell.get("target")
+            if tb is not None and tb in self.bricks:
+                rect = cell_rect(tb.col, tb.row, tb.shape,
+                                 self._brick_off(tb))
+                shell["tx"], shell["ty"] = (float(rect.centerx),
+                                            float(rect.centery))
 
         # Update mortar shells in flight
         landed = [s for s in self.mortar_shells if s["t"] + dt / s["duration"] >= 1.0]
@@ -527,6 +649,31 @@ class Game:
                                 if b["timer"] > 0]
         for b in self.lightning_bolts:
             b["timer"] -= dt
+        self.dying_bricks = [d for d in self.dying_bricks if d["timer"] > 0]
+        for d in self.dying_bricks:
+            d["timer"] -= dt
+        for b in self.bricks:
+            if b.spawn_t > 0:
+                b.spawn_t = max(0.0, b.spawn_t - dt)
+            if b.flash > 0:
+                b.flash = max(0.0, b.flash - dt)
+        self.ammo_flash = max(0.0, self.ammo_flash - dt)
+
+        # Board cleared this frame: drop a pickup as a reward
+        if had_bricks and not self.bricks:
+            self._drop_clear_reward()
+
+    def _drop_clear_reward(self):
+        """Reward for clearing the board: one random unlocked pickup,
+        dropped in the upper rows so there's time to shoot it."""
+        pool = [t for t in ("ammo",) + tuple(AMMO_TYPES)
+                if self.wave >= PICKUP_UNLOCK[t]]
+        cells = [c for c in self._free_cells() if c[1] <= 3]
+        if not cells:
+            return
+        col, row = random.choice(cells)
+        self.pickups.append({"col": col, "row": row,
+                             "type": random.choice(pool)})
 
     def _steer_homing(self, p: Projectile, dt: float):
         best_dist = float('inf')
@@ -552,6 +699,22 @@ class Game:
         speed = p.vel.length()
         p.vel.x = math.cos(new_angle) * speed
         p.vel.y = math.sin(new_angle) * speed
+
+    def _kill_brick(self, brick: Brick, damage: int = 1):
+        """Record a killed brick for the shrink-out animation."""
+        rect = cell_rect(brick.col, brick.row, brick.shape,
+                         self._brick_off(brick))
+        cy = rect.centery
+        if brick.spawn_t > 0:
+            # Match the render slide-in offset so the ghost appears
+            # where the brick was drawn, not at its logical position
+            cy -= CELL_SIZE * (brick.spawn_t / SPAWN_ANIM_TIME)
+        self.dying_bricks.append({
+            "shape": brick.shape, "tri_dir": brick.tri_dir,
+            "cx": rect.centerx, "cy": cy,
+            "hp": max(1, brick.hp + damage),  # color before the killing blow
+            "timer": DEATH_ANIM_TIME,
+        })
 
     def _in_tar(self, brick: Brick) -> bool:
         """True if the brick touches any tar zone."""
@@ -797,7 +960,7 @@ class Game:
             blocked_hp_pre: dict[int, int] = {}
             for c in spawn_candidates:
                 if c in full_cols:
-                    blocked_hp_pre[c] = max(1, self.wave)
+                    blocked_hp_pre[c] = max(1, self.wave - self.skull_hp_cut)
             if blocked_hp_pre:
                 self._distribute_blocked_hp(blocked_hp_pre)
 
@@ -829,7 +992,9 @@ class Game:
         for c in brick_cols:
             if c in occupied:
                 continue
-            hp = max(1, self.wave)
+            hp = max(1, self.wave - self.skull_hp_cut)
+            if random.random() < DOUBLE_HP_CHANCE:
+                hp *= 2
 
             shape = random.choices(shapes, weights=weights)[0]
 
@@ -863,13 +1028,16 @@ class Game:
                               and b.shape == "square"), None)
                 if below is not None:
                     self.bricks.remove(below)
+                    # No slide-in: the bottom half was already on screen,
+                    # animating the whole tall brick would make it jump up
                     self.bricks.append(Brick(
                         col=c, row=0, hp=hp + below.hp, shape="tall",
                         shield=max(shield, below.shield)))
                     continue
 
             self.bricks.append(Brick(col=c, row=0, hp=hp, shape=shape,
-                                     tri_dir=tri_dir, shield=shield))
+                                     tri_dir=tri_dir, shield=shield,
+                                     spawn_t=SPAWN_ANIM_TIME))
 
         # Spawn ammo pickup (row 0 only, not during reverse, skip every 5th wave)
         if remaining and self.reverse_timer <= 0 and self.wave % 5 != 0:
@@ -903,7 +1071,6 @@ class Game:
         _spawn_grid("tar", 0.15, "tar")
 
         # Gun PUs (grid-based, advance with bricks, ball hit to activate)
-        _spawn_grid("fireball", 0.15, "fireball")
         _spawn_grid("homing", 0.12, "homing")
 
         # AoE PUs (pixel-based, stationary, ball hit to activate)
@@ -930,16 +1097,34 @@ class Game:
         self.aim_angle = angle
 
     def volley_size(self) -> int:
-        """Shots per trigger — grows with the ammo pool."""
-        return min(VOLLEY_MAX_SHOTS, 1 + self.gun_ammo // VOLLEY_STEP)
+        """Shots per trigger — grows with the ammo pool. While firing,
+        the size can still grow if the pool grows (pickups), but never
+        shrinks as the pool drains."""
+        size = min(VOLLEY_MAX_SHOTS, 1 + self.gun_ammo // VOLLEY_STEP)
+        if self.volley_lock is not None:
+            size = max(size, self.volley_lock)
+        return size
+
+    def stop_fire(self):
+        """Trigger released: next burst recomputes its volley size."""
+        self.volley_lock = None
 
     def fire_gun(self) -> bool:
-        if self.gun_ammo <= 0 or self.gun_cooldown > 0:
+        if self.gun_ammo <= 0:
+            # Pool emptied outside fire_gun too (e.g. skull penalty):
+            # the burst is over either way
+            self.volley_lock = None
             return False
-        shots = min(self.volley_size(), self.gun_ammo)
+        if self.gun_cooldown > 0:
+            return False
+        self.volley_lock = self.volley_size()
+        shots = min(self.volley_lock, self.gun_ammo)
         self.gun_cooldown = GUN_COOLDOWN
-        launch_x = self.gun_x
-        launch_y = GRID_BOTTOM - PROJECTILE_RADIUS
+        launch_x = self.gun_x + math.cos(self.aim_angle) * GUN_BARREL_LEN
+        launch_x = max(PROJECTILE_RADIUS,
+                       min(WIDTH - PROJECTILE_RADIUS, launch_x))
+        launch_y = (GRID_BOTTOM - PROJECTILE_RADIUS
+                    + math.sin(self.aim_angle) * GUN_BARREL_LEN)
         spread = math.radians(VOLLEY_SPREAD_DEG)
         for i in range(shots):
             self.gun_ammo -= 1
@@ -949,62 +1134,177 @@ class Game:
                 math.sin(angle) * PROJECTILE_SPEED,
             )
             p = Projectile(pygame.math.Vector2(launch_x, launch_y), vel)
-            if self.fireball_charges > 0:
-                p.fireball = True
-                self.fireball_charges -= 1
-            elif self.homing_charges > 0:
-                p.homing = True
-                p.homing_timer = 10.0  # 10 sec homing per projectile
-                self.homing_charges -= 1
+            # Only the center shot of a volley is special — one loaded
+            # bullet per trigger, flying straight at the aim point
+            if i == shots // 2 and self.gun_queue:
+                loaded = self.gun_queue.pop(0)
+                if loaded == "bomb":
+                    p.fireball = True  # fire bullet: pierces bricks
+                elif loaded == "homing":
+                    p.homing = True
+                    p.homing_timer = 10.0  # 10 sec homing per projectile
+                elif loaded == "tar":
+                    p.tar = True
+                elif loaded == "acid":
+                    p.acid = True
+                elif loaded == "wall":
+                    p.wallshot = True
+                elif loaded == "mine":
+                    p.mine = True
             self.projectiles.append(p)
+        if self.gun_ammo <= 0:
+            self.volley_lock = None  # out of ammo: burst is over
         return True
 
     def cycle_mortar(self, step: int):
-        """Cycle mortar type selection (scroll wheel)."""
-        self.mortar_sel = (self.mortar_sel + step) % len(MORTAR_TYPES)
+        """Cycle ammo type selection (scroll wheel)."""
+        self.ammo_sel = (self.ammo_sel + step) % len(AMMO_TYPES)
 
     def select_mortar(self, index: int):
-        """Select mortar type directly (number keys)."""
-        if 0 <= index < len(MORTAR_TYPES):
-            self.mortar_sel = index
+        """Select ammo type directly (number keys)."""
+        if 0 <= index < len(AMMO_TYPES):
+            self.ammo_sel = index
+
+    def _sync_sel(self):
+        """If the selected type ran dry, highlight the next stocked one."""
+        if self.ammo_inv[AMMO_TYPES[self.ammo_sel]] <= 0:
+            for i in range(1, len(AMMO_TYPES)):
+                t = AMMO_TYPES[(self.ammo_sel + i) % len(AMMO_TYPES)]
+                if self.ammo_inv[t] > 0:
+                    self.ammo_sel = AMMO_TYPES.index(t)
+                    break
+
+    def load_gun(self) -> bool:
+        """Spend one unit of the selected type to queue GUN_LOAD_SHOTS
+        special bullets in the gun. Loads stack in firing order."""
+        mtype = AMMO_TYPES[self.ammo_sel]
+        if mtype not in GUN_CAPABLE or self.ammo_inv[mtype] <= 0:
+            return False
+        self.ammo_inv[mtype] -= 1
+        self.gun_queue.extend([mtype] * GUN_LOAD_SHOTS)
+        self._sync_sel()
+        return True
+
+    def panic_gun(self) -> bool:
+        """Panic load (W): queue one unit of EVERY stocked gun-capable
+        type into the gun at once."""
+        loaded = False
+        for mtype in AMMO_TYPES:
+            if mtype in GUN_CAPABLE and self.ammo_inv[mtype] > 0:
+                self.ammo_inv[mtype] -= 1
+                self.gun_queue.extend([mtype] * GUN_LOAD_SHOTS)
+                loaded = True
+        if loaded:
+            self._sync_sel()
+        return loaded
+
+    def _nearest_brick_to_gun(self) -> Brick | None:
+        gx, gy = self.gun_x, float(GRID_BOTTOM)
+        best, best_d = None, float("inf")
+        for b in self.bricks:
+            rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+            d = math.hypot(rect.centerx - gx, rect.centery - gy)
+            if d < best_d:
+                best, best_d = b, d
+        return best
 
     def fire_mortar(self) -> bool:
-        """Launch a mortar shell of the selected type toward the crosshair."""
+        """Launch a mortar shell of the selected type toward the
+        crosshair — except homing, a rocket that flies to the brick
+        closest to the gun and explodes on it."""
         if self.mortar_cooldown > 0:
             return False
-        mtype = MORTAR_TYPES[self.mortar_sel]
-        if self.mortar_ammo[mtype] <= 0:
-            # Fall back to the first type with ammo
-            for t in MORTAR_TYPES:
-                if self.mortar_ammo[t] > 0:
+        mtype = AMMO_TYPES[self.ammo_sel]
+        if mtype not in MORTAR_CAPABLE or self.ammo_inv[mtype] <= 0:
+            # Fall back to the first mortar-capable type with ammo
+            for t in AMMO_TYPES:
+                if t in MORTAR_CAPABLE and self.ammo_inv[t] > 0:
                     mtype = t
                     break
             else:
                 return False
-        self.mortar_ammo[mtype] -= 1
+        target = None
+        if mtype == "homing":
+            target = self._nearest_brick_to_gun()
+            if target is None:
+                return False  # rocket needs a target
+        self.ammo_inv[mtype] -= 1
         self.mortar_cooldown = MORTAR_COOLDOWN
         # Keep the HUD highlight on the type actually firing; when it
         # runs dry, advance to the next stocked type
-        self.mortar_sel = MORTAR_TYPES.index(mtype)
-        if self.mortar_ammo[mtype] <= 0:
-            for i in range(1, len(MORTAR_TYPES)):
-                t = MORTAR_TYPES[(self.mortar_sel + i) % len(MORTAR_TYPES)]
-                if self.mortar_ammo[t] > 0:
-                    self.mortar_sel = MORTAR_TYPES.index(t)
-                    break
-        mx, my = self.crosshair
-        my = max(GRID_TOP, min(GRID_BOTTOM, my))
+        self.ammo_sel = AMMO_TYPES.index(mtype)
+        self._sync_sel()
+        if target is not None:
+            rect = cell_rect(target.col, target.row, target.shape,
+                             self._brick_off(target))
+            mx, my = rect.center
+        else:
+            mx, my = self.crosshair
+            my = max(GRID_TOP, min(GRID_BOTTOM, my))
         # Launch from gun position
         sx, sy = self.gun_x, float(GRID_BOTTOM)
         dist = math.hypot(mx - sx, my - sy)
         duration = max(0.2, min(0.6, dist / 600))
-        self.mortar_shells.append({
+        shell = {
             "sx": sx, "sy": sy,       # start
             "tx": float(mx), "ty": float(my),  # target
             "type": mtype,
             "t": 0.0,                 # progress 0..1
             "duration": duration,
-        })
+        }
+        if target is not None:
+            shell["target"] = target  # tracked while flying
+        self.mortar_shells.append(shell)
+        return True
+
+    def panic(self) -> bool:
+        """Panic barrage: one shell of each stocked mortar type (walls
+        excluded — a wall in a barrage is wasted) at the lowest occupied
+        brick row. Ignores the mortar cooldown; the ammo is the cost."""
+        if not self.bricks:
+            return False
+        types = [t for t in AMMO_TYPES
+                 if t != "wall" and self.ammo_inv[t] > 0]
+        if not types:
+            return False
+        low_row = max(r for b in self.bricks for _, r in b.cells())
+        row_bricks = [b for b in self.bricks
+                      if any(r == low_row for _, r in b.cells())]
+        xs = sorted(
+            cell_rect(b.col, b.row, b.shape, self._brick_off(b)).centerx
+            for b in row_bricks)
+        # Snap the crosshair to the biggest threat on that row
+        biggest = max(row_bricks, key=lambda b: b.hp)
+        brect = cell_rect(biggest.col, biggest.row, biggest.shape,
+                          self._brick_off(biggest))
+        self.crosshair = (brect.centerx,
+                          min(GRID_BOTTOM, brect.centery
+                              + biggest.extra_height // 2))
+        row_y = GRID_TOP + (low_row + 0.5) * CELL_SIZE + self.brick_offset
+        row_y = max(GRID_TOP, min(GRID_BOTTOM, row_y))
+        sx, sy = self.gun_x, float(GRID_BOTTOM)
+        for i, mtype in enumerate(types):
+            # Spread targets across the row's bricks, left to right
+            if len(types) > 1:
+                k = round(i * (len(xs) - 1) / (len(types) - 1))
+            else:
+                k = len(xs) // 2
+            tx = float(xs[k])
+            # Mines land a cell below the row so advancing bricks hit them
+            ty = (min(GRID_BOTTOM, row_y + CELL_SIZE)
+                  if mtype == "mine" else row_y)
+            self.ammo_inv[mtype] -= 1
+            dist = math.hypot(tx - sx, ty - sy)
+            shell = {
+                "sx": sx, "sy": sy, "tx": tx, "ty": ty,
+                "type": mtype, "t": 0.0,
+                "duration": max(0.2, min(0.6, dist / 600)),
+            }
+            if mtype == "homing":
+                shell["target"] = biggest  # rocket locks the big one
+            self.mortar_shells.append(shell)
+        # Keep the HUD highlight on a stocked type
+        self._sync_sel()
         return True
 
     def _land_mortar(self, shell: dict):
@@ -1029,6 +1329,8 @@ class Game:
                 "y": my, "max_weight": max(1, self.wave) * 15,
                 "grace": 2.0, "ttl": 12.0,
             })
+        elif mtype == "homing":
+            self._explode(mx, my)  # rocket detonates on its target
 
     # ------------------------------------------------------------------
     # Brick collisions
@@ -1047,8 +1349,11 @@ class Game:
                                         PROJECTILE_RADIUS * 2)
                 if expanded.collidepoint(bx, by):
                     brick.hp -= 1
+                    if brick.shield > 0:
+                        brick.shield -= 1  # fire chips armor as it passes
                     proj.border_hits = 0
                     if brick.hp <= 0:
+                        self._kill_brick(brick)
                         to_remove.append(i)
         else:
             # Normal/homing: bounce off first brick hit
@@ -1090,8 +1395,29 @@ class Game:
                     else:
                         brick.hp -= 1
 
+                    if proj.tar:
+                        # Tar bullet: each hit slows the brick 15% more
+                        # (up to a full stop), 3s from the LAST hit
+                        brick.slow_pct = min(1.0,
+                                             brick.slow_pct + TARSHOT_SLOW)
+                        brick.slow_t = TARSHOT_TIME
+                    if proj.acid:
+                        # Acid bullet: 1 dmg/s DoT, 3s from the LAST hit
+                        brick.acid_dot = ACIDSHOT_DOT
+                        brick.acid_t = max(brick.acid_t, ACIDSHOT_DOT)
+                    if proj.wallshot:
+                        # Wall bullet: full stop, like a lightning stun
+                        brick.stun = max(brick.stun, WALLSHOT_STUN)
+                    if proj.mine:
+                        # Sticky charge: rides the first brick hit and
+                        # blows after the fuse; the ball bounces on
+                        proj.mine = False
+                        self.sticky_charges.append(
+                            {"brick": brick, "timer": STICKY_FUSE})
+
                     proj.border_hits = 0
                     if brick.hp <= 0:
+                        self._kill_brick(brick)
                         to_remove.append(i)
                     break
 
@@ -1292,12 +1618,8 @@ class Game:
         """Apply the effect of a collected field pickup."""
         if ptype == "ammo":
             self.gun_ammo += AMMO_PER_PICKUP
-        elif ptype == "fireball":
-            self.fireball_charges += FIREBALL_CHARGES
-        elif ptype == "homing":
-            self.homing_charges += HOMING_CHARGES
-        else:  # bomb / mine / acid / wall — collected as mortar ammo
-            self.mortar_ammo[ptype] += 1
+        else:  # everything else is one unit of shared ammo inventory
+            self.ammo_inv[ptype] += 1
 
     def _collide_pickups(self, proj: Projectile):
         bx, by = proj.pos.x, proj.pos.y
@@ -1320,11 +1642,20 @@ class Game:
         for w in self.placed_walls:
             wy = w["y"]
             if abs(py - wy) < PROJECTILE_RADIUS + 2:
-                if proj.vel.y > 0:
+                # Only bounce shots moving toward the wall — a grazing
+                # shot still inside the band after its bounce must not
+                # re-trigger every frame (it would slide along the wall,
+                # chipping it each frame)
+                if py <= wy and proj.vel.y > 0:
                     proj.pos.y = wy - PROJECTILE_RADIUS - 1
-                else:
+                    proj.vel.y = -proj.vel.y
+                    proj._min_rebound("y", -1)
+                elif py > wy and proj.vel.y < 0:
                     proj.pos.y = wy + PROJECTILE_RADIUS + 1
-                proj.vel.y = -proj.vel.y
+                    proj.vel.y = -proj.vel.y
+                    proj._min_rebound("y", 1)
+                else:
+                    continue
                 proj.border_hits = 0
                 # Each bounce chips the wall: its weight capacity drops by 1,
                 # so bouncing your own shots off a wall shortens its life.
@@ -1357,7 +1688,7 @@ class Game:
         }
 
     def _trigger_lightning(self, x: float, y: float):
-        """Chain strikes: light damage + 1s stun on random bricks."""
+        """Chain strikes: light damage + a stun on random bricks."""
         if not self.bricks:
             return
         targets = random.sample(self.bricks,
@@ -1369,6 +1700,8 @@ class Game:
             points.append(rect.center)
             b.hp -= damage
             b.stun = LIGHTNING_STUN
+            if b.hp <= 0:
+                self._kill_brick(b, damage)
         self.bricks = [b for b in self.bricks if b.hp > 0]
         self.lightning_bolts.append({
             "points": _jagged_path(points),
@@ -1386,6 +1719,9 @@ class Game:
         for b in self.bricks:
             b.hp = max(1, b.hp // 2)
             b.shield //= 2
+        # Permanent supply-side cut: new bricks lose half of the current
+        # spawn HP from now on; stacks with every skull
+        self.skull_hp_cut += max(1, self.wave - self.skull_hp_cut) // 2
         in_flight = sum(1 for p in self.projectiles if p.alive)
         total = self.gun_ammo + self.gun_reloading + in_flight
         destroy = total - max(1, total // 2) if total > 1 else 0
@@ -1401,6 +1737,7 @@ class Game:
             "max_radius": math.hypot(WIDTH, HEIGHT),
             "speed": 800,
         }
+        self.ammo_flash = AMMO_FLASH_TIME
 
     def _collide_placed_aoe(self, proj: Projectile, placed: list[dict],
                             trigger):
@@ -1453,8 +1790,10 @@ class Game:
                              self._brick_off(brick))
             cx, cy = rect.center
             if math.hypot(cx - ex, cy - ey) < blast_px:
+                brick.shield //= 2  # blast cracks armor
                 brick.hp -= damage
                 if brick.hp <= 0:
+                    self._kill_brick(brick, damage)
                     to_remove.append(i)
         for i in reversed(to_remove):
             self.bricks.pop(i)
@@ -1507,9 +1846,14 @@ class Game:
                     cx = max(rect.left, min(acid["x"], rect.right))
                     cy = max(rect.top, min(acid["y"], rect.bottom))
                     if math.hypot(cx - acid["x"], cy - acid["y"]) < acid_px:
-                        brick.hp -= damage
-                        if brick.hp <= 0:
-                            to_remove.append(i)
+                        if brick.shield > 0:
+                            # Acid melts armor before flesh
+                            brick.shield = max(0, brick.shield - damage)
+                        else:
+                            brick.hp -= damage
+                            if brick.hp <= 0:
+                                self._kill_brick(brick, damage)
+                                to_remove.append(i)
                 for i in reversed(to_remove):
                     self.bricks.pop(i)
         self.placed_acids = [a for a in self.placed_acids if a["timer"] > 0]

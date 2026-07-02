@@ -5,8 +5,8 @@ import pygame
 from game import FPS, HEIGHT, WIDTH, Game
 from render import draw_game, draw_help, draw_menu
 
-MORTAR_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
-               pygame.K_5: 4}
+AMMO_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
+             pygame.K_5: 4, pygame.K_6: 5}
 
 
 def main():
@@ -52,6 +52,7 @@ def main():
 
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 mouse_held = False
+                game.stop_fire()
 
             if event.type == pygame.MOUSEWHEEL:
                 if game.phase == "playing" and event.y != 0:
@@ -63,8 +64,18 @@ def main():
                         game.phase = "paused"
                     elif game.phase == "paused":
                         game.phase = "playing"
-                if event.key in MORTAR_KEYS and game.phase == "playing":
-                    game.select_mortar(MORTAR_KEYS[event.key])
+                if event.key in AMMO_KEYS and game.phase == "playing":
+                    game.select_mortar(AMMO_KEYS[event.key])
+                if event.key == pygame.K_r and game.phase == "playing":
+                    game.load_gun()
+                if event.key == pygame.K_w and game.phase == "playing":
+                    game.panic_gun()
+                if event.key == pygame.K_q and game.phase == "playing":
+                    if game.panic():
+                        # Panic snaps the crosshair to the biggest brick
+                        # on the lowest row — move the mouse along so
+                        # the next frame doesn't snap it back
+                        pygame.mouse.set_pos(game.crosshair)
                 if event.key == pygame.K_ESCAPE:
                     if show_help:
                         show_help = False

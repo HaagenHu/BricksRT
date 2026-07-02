@@ -22,42 +22,42 @@ Based on the turn-based [Bricks](https://github.com/HaagenHu/Bricks) game, reusi
 ## Weapons
 
 ### Gun (Left Mouse)
-Fires single projectiles from the bottom center. Rapid fire with cooldown.
+Fires single projectiles from the barrel tip. Rapid fire with cooldown.
 
-| Ammo Type | Effect | Source |
-|-----------|--------|--------|
-| Normal | Bounces off bricks, 1 damage per hit | Default, infinite |
-| Fireball | Passes through bricks, 1 damage each | Pickup |
-| Homing | Gently steers toward nearest brick | Pickup |
-
-- Ammo is shared pool (like ball count in Bricks)
+- Normal balls bounce off bricks, 1 damage per hit; the pool circulates
+  (exit at bottom = ammo returns after a short reload delay, and the
+  gun drifts toward the exit point)
 - Volley scaling: surplus ammo converts to shots per trigger in a
-  small spread — 2 at 15+ ammo, 3 at 30+, 4 at 45+. Keeps the pool
-  circulating instead of accumulating dead inventory
-- Fireball/homing are temporary upgrades applied to next N shots
-  (one charge per volley projectile)
-- Projectiles still bounce off walls and ceiling
-- Projectile exits at bottom = ammo returns after a short reload delay,
-  and the gun drifts toward the exit point
+  small spread — 2 at 15+ ammo, 3 at 30+, 4 at 45+. While firing, the
+  size can grow if the pool grows (pickups) but never shrinks as it
+  drains; it recomputes on release or an empty pool
+- Loading (R): spends 1 unit of the selected ammo type for 5 special
+  bullets, queued in firing order (repeat R stacks). The CENTER shot
+  of each volley fires the next queued bullet, straight at the aim
+  point; the rest of the volley stays normal
 
-### Mortar (Right Mouse)
-Fires arcing projectile to crosshair position. Slower cooldown (0.6s), limited ammo.
+### Shared Ammo Inventory
+One counter per type (pickups give +1 unit). Each unit fires one
+mortar round (right click, 0.6s cooldown, arcs to the crosshair) OR
+loads the gun with 5 special bullets (R). Selected with scroll or
+keys 1-6; firing with an empty/incapable selection falls back to the
+first stocked type.
 
-| Ammo Type | Effect | Source |
-|-----------|--------|--------|
-| Mine | Lands armed, explodes on brick contact | Pickup (wave 10+) |
-| Wall | Places energy barrier blocking brick column | Pickup (wave 20+) |
-| Bomb | Explodes at target, area damage | Pickup (wave 30+) |
-| Tar | Zone that halves brick advance speed for 8s | Pickup (wave 40+) |
-| Acid | Area DoT at target position | Pickup (wave 60+) |
+| Type | Mortar round | Gun load (5 bullets) | Unlock |
+|------|--------------|----------------------|--------|
+| Mine | Lands armed, explodes on brick contact (chains) | Sticky charge: rides the first brick hit, blows after 1.5s | 10 |
+| Wall | Barrier holding the field until overloaded | Full stop on hit brick, 2s | 20 |
+| Bomb | Explodes at target, area damage, halves shields | Fire bullet: pierces through bricks, chips 1 shield per pass | 30 |
+| Tar | Zone halving brick advance speed, 8s | +15% slow per hit, stacks to a stop, 3s from last hit | 40 |
+| Acid | Area DoT zone, 5s — melts shields before hp | Acid DoT: 1/s for 3s, shield first | 60 |
+| Homing | Rocket: flies to the brick nearest the gun and explodes on it | Shots steer toward the nearest brick, 10s | 100 |
 
-- Mortar ammo is collected per type, not infinite
-- Type is selected with scroll wheel or number keys 1-5; firing with an
-  empty selection falls back to the first type with ammo
-- Mortar fires TO the crosshair position (targeted, not bouncing)
-- Explosion/effect happens at impact point
-- Mine is also a mortar type: lands as a stationary mine that explodes
-  on brick contact (and chains with bombs)
+- Panic mortar (Q): fires one shell of each stocked mortar-capable
+  type (walls excluded) spread along the lowest occupied brick row,
+  bypassing the cooldown; mines land one cell below the row; the
+  crosshair snaps to the biggest brick on that row
+- Panic gun (W): loads one unit of EVERY stocked gun-capable type
+  into the gun queue at once
 
 ### AoE (Passive)
 Field-wide effects triggered by shooting a field pickup (or when a brick
@@ -67,8 +67,8 @@ touches it).
 |------|--------|--------|
 | Freeze | Stops all brick advancement for 5 seconds | Pickup |
 | Reverse | Bricks move upward for 3 seconds | Pickup |
-| Lightning | Zaps 6 random bricks (wave/5 dmg) and stuns them 1s | Pickup (wave 90+) |
-| Skull | Halves brick HP/shields AND total gun ammo (incl. in-flight) | Spawns in bottom rows every 5 min after 10 min |
+| Lightning | Zaps 6 random bricks (wave/5 dmg) and stuns them 2s | Pickup (wave 90+) |
+| Skull | Halves brick HP/shields AND total gun ammo (incl. in-flight); also permanently cuts new-brick spawn HP by half the current spawn HP (stacks per skull) | Spawns in bottom rows every 5 min after 10 min |
 
 ---
 
@@ -79,7 +79,10 @@ Reuse all shapes from Bricks:
 - Square, Wide, Tall, Round, Diamond, Hexagon, Trapezoid, Triangle (4 orientations)
 
 ### Properties
-- HP scales with game time / wave number
+- HP scales with game time / wave number; 5% of spawns have double HP
+- Spawn HP = wave − skull cut: each skull permanently adds half the
+  then-current spawn HP to the cut (e.g. skull at wave 110 → new
+  bricks spawn at wave − 55)
 - Shields (bottom protection)
 - Merging (wave 70+): a spawning square can fuse with the square below it
   into a tall brick with combined HP
@@ -104,16 +107,31 @@ Reuse all shapes from Bricks:
 ### Pickups
 Pickups spawn among bricks (like +ball in Bricks). Player must shoot them to collect.
 
+Clearing the board drops one random unlocked collectible pickup
+(ammo or any inventory type, no AoE) in the upper rows as a reward.
+
 | Pickup | Gives |
 |--------|-------|
-| Ammo Crate | +N normal ammo |
-| Fireball | Next N shots are fireballs |
-| Homing | Next N shots are homing |
-| Bomb x1 | +1 mortar bomb |
-| Acid x1 | +1 mortar acid |
-| Wall x1 | +1 mortar wall |
-| Freeze | Immediate freeze effect |
-| Lightning | Immediate lightning strikes |
+| Ammo | +1 normal gun ball |
+| Mine / Wall / Bomb / Tar / Acid / Homing | +1 unit of shared ammo inventory |
+| Freeze / Reverse / Lightning | Immediate AoE effect |
+
+### Pickup Ideas (suggestions, not implemented)
+
+Candidates for the wave 55-95 unlock gaps. The strongest ones deepen
+the bounce economy (shot longevity / bounce density) rather than
+adding raw damage.
+
+| Idea | System | Effect | Notes |
+|------|--------|--------|-------|
+| Split shot | Gun charges | Next N shots split into 3 (±30°) on first brick hit | Bounce-volume multiplier; clones must NOT refund ammo on exit or the pool inflates |
+| Rubber shot | Gun charges | No anti-bounce gravity, slight speed gain per bounce | Pure longevity buff; nearly free to build |
+| Updraft | Mortar | Zone that deflects projectiles upward, back into the field | Terrain for your shots — mirror image of tar; extends shot lifetimes |
+| Tesla pylon | Mortar | Zaps nearest brick every 1s for ~8s (light dmg + 1s stun) | Sustained positional lightning; reuses bolt + stun infra |
+| Overcharge | AoE | Gun cooldown halved for ~6s | Stacks multiplicatively with volley — check it doesn't trivialize the fire-rate cap |
+| Kill spark | AoE | For ~5s each brick kill emits a quarter-strength explosion | Chain-reaction payoff in dense low-HP fields |
+
+Recommended first: Split shot + Updraft.
 
 ---
 
@@ -158,7 +176,10 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 | Left click | Fire gun |
 | Left hold | Rapid fire gun |
 | Right click | Fire mortar at crosshair |
-| Scroll / 1-5 | Select mortar ammo type |
+| Scroll / 1-6 | Select ammo type |
+| R | Load gun: 1 unit of selected type = 5 special bullets (queues) |
+| Q | Panic mortar: one shell of each stocked type (no walls) at the lowest brick row |
+| W | Panic gun: load one unit of every gun-capable type |
 | Space | Pause |
 | Escape | Menu (saves highscore) |
 
@@ -176,6 +197,55 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 - Fireball glow (orange trail on projectile)
 - Homing trail (green projectile)
 - Danger flash (pulsing red on low bricks)
+
+---
+
+## Sound (suggestion, not implemented)
+
+Per-event audio would be white noise at this event density (volleys up
+to 8 triggers/s x 4 shots, dozens of bouncing projectiles). Sound the
+meaning, not the events:
+
+| Tier | Events | Rule |
+|------|--------|------|
+| Always | Mortar launch/impact, pickup collected, AoE triggers (distinct voice each), wall placed/broken, game over, new best | Rare and meaningful — 1-3/s at peak |
+| Rate-limited | Brick kills (not hits) | Short pop, max 1 per ~70ms; extras dropped or folded into one louder pop |
+| Mostly silent | Gun fire, bounces, brick hits | One soft tick per trigger (not per volley shot) or a hum while held; wall/ceiling bounces silent; hit ticks only when in-flight count is low (mute above ~8) |
+
+Implementation notes:
+- `pygame.mixer.pre_init(44100, -16, 2, 256)` before `pygame.init()`
+  for low latency so kills feel connected to the action
+- Sounds can be generated procedurally with numpy at startup (short
+  sine/noise envelopes) — no asset files, repo stays self-contained
+- Rate limiter = dict of last-played timestamps checked before `.play()`
+- Start with the "Always" tier + rate-limited kills (~10 tiny sounds),
+  playtest density before adding fire/bounce ticks
+
+---
+
+## Graphics improvements (suggestions)
+
+Juice over art assets — ranked by impact per effort:
+
+1. Hit flash + kill particles: brick flashes white ~50ms on hit; on
+   death bursts into 8-12 shards of its own color (particle list like
+   `explosions`)
+2. Projectile trails: last ~8 positions as shrinking, fading circles —
+   makes ricochet paths readable (core mechanic!)
+3. Screen shake: decaying random offset on bomb/wall break/skull
+4. Additive glow: `BLEND_ADD` over pre-rendered radial-gradient
+   sprites for projectiles/explosions/waves — neon look on dark bg
+5. Brick depth + damage states: dark bottom-right edge, light top
+   edge; cracks below ~30% of spawn HP (needs `max_hp` on Brick)
+6. Spawn/death animation — **implemented**: rows slide down from
+   behind the HUD; killed bricks shrink out over ~0.12s
+7. Ambient depth — **implemented**: three parallax star layers drift
+   slowly down the field (game-time driven, freezes on pause), and a
+   red danger gradient over the last three rows fades in as the lowest
+   brick approaches the death line (full strength at the line)
+
+Performance: fine at 480x720/60 in pygame-ce if glow sprites are
+pre-rendered once (never build per-pixel alpha surfaces per frame).
 
 ---
 

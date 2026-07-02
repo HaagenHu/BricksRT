@@ -2,25 +2,29 @@
 
 import colorsys
 import math
+import random
 
 import pygame
 
 from game import (
     WIDTH, HEIGHT, TOP_UI_HEIGHT, BOTTOM_AREA_HEIGHT, GRID_TOP, GRID_BOTTOM,
-    CELL_SIZE, BRICK_SIZE, PROJECTILE_RADIUS, BOMB_RADIUS_CELLS,
-    ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, MORTAR_TYPES, UNLOCK,
+    CELL_SIZE, BRICK_SIZE, PROJECTILE_RADIUS, GUN_BARREL_LEN,
+    BOMB_RADIUS_CELLS,
+    ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
+    SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
     Brick, Game, cell_rect,
 )
 
 # Colors
 BG_COLOR = (20, 20, 30)
 TEXT_COLOR = (255, 255, 255)
-CROSSHAIR_COLOR = (200, 200, 200)
-COLLECTIBLE_COLOR = (100, 255, 130)
+CROSSHAIR_COLOR = (60, 160, 255)  # azure — the one hue bricks never use
+CROSSHAIR_OUTLINE = (10, 10, 15)
+COLLECTIBLE_COLOR = (235, 210, 90)  # gold, matches the HUD ammo bullets
 BOMB_COLOR = (255, 80, 50)
 AMMO_COLOR = (220, 200, 100)
 SHIELD_COLOR = (0, 220, 255)
-MINE_COLOR = (255, 50, 50)
+MINE_COLOR = (225, 228, 238)  # steel — separates it from the red bomb
 MORTAR_BOMB_COLOR = (255, 80, 50)
 MORTAR_ACID_COLOR = (120, 255, 0)
 MORTAR_WALL_COLOR = (255, 160, 40)
@@ -37,22 +41,65 @@ HUD_BG = (30, 30, 45)
 # Field pickup style: type -> (color, label, radius factor)
 PICKUP_STYLE = {
     "ammo": (COLLECTIBLE_COLOR, "+", 0.20),
-    "bomb": (BOMB_COLOR, "B", 0.22),
     "mine": (MINE_COLOR, "M", 0.22),
-    "acid": (MORTAR_ACID_COLOR, "A", 0.22),
     "wall": (MORTAR_WALL_COLOR, "W", 0.22),
+    "bomb": (BOMB_COLOR, "B", 0.22),
     "tar": (TAR_COLOR, "T", 0.22),
-    "fireball": (FIREBALL_COLOR, "F", 0.22),
+    "acid": (MORTAR_ACID_COLOR, "A", 0.22),
     "homing": (HOMING_COLOR, "H", 0.22),
 }
 
-MORTAR_STYLE = {
-    "bomb": (MORTAR_BOMB_COLOR, "B"),
+# HUD slot / shell style per shared-ammo type
+AMMO_STYLE = {
     "mine": (MINE_COLOR, "M"),
-    "acid": (MORTAR_ACID_COLOR, "A"),
     "wall": (MORTAR_WALL_COLOR, "W"),
+    "bomb": (MORTAR_BOMB_COLOR, "B"),
     "tar": (TAR_COLOR, "T"),
+    "acid": (MORTAR_ACID_COLOR, "A"),
+    "homing": (HOMING_COLOR, "H"),
 }
+
+# Starfield: parallax layers as (speed px/s, radius, shade, star count).
+# Positions are generated once from a fixed seed.
+_STAR_LAYER_SPECS = ((3.0, 1, 70, 45), (6.0, 1, 110, 26), (11.0, 2, 160, 12))
+_star_layers: list[tuple[float, int, tuple[int, int, int],
+                         list[tuple[int, int]]]] = []
+
+
+def draw_starfield(screen: pygame.Surface, t: float,
+                   top: int = GRID_TOP, bottom: int = GRID_BOTTOM):
+    """Dim stars drifting slowly downward; nearer layers are brighter,
+    bigger, and faster. Driven by game time, so pause freezes it."""
+    if not _star_layers:
+        rng = random.Random(12)
+        for speed, size, shade, count in _STAR_LAYER_SPECS:
+            color = (shade, shade, min(255, shade + 25))
+            stars = [(rng.randrange(WIDTH), rng.randrange(HEIGHT))
+                     for _ in range(count)]
+            _star_layers.append((speed, size, color, stars))
+    span = bottom - top
+    for speed, size, color, stars in _star_layers:
+        drift = t * speed
+        for sx, sy in stars:
+            y = top + (sy + drift) % span
+            pygame.draw.circle(screen, color, (sx, int(y)), size)
+
+
+# Danger gradient: pre-rendered red glow, alpha 0 at the top to max at
+# the bottom, scaled at blit time by how close the lowest brick is
+DANGER_GRAD_H = CELL_SIZE * 3
+_danger_grad: pygame.Surface | None = None
+
+
+def _danger_gradient() -> pygame.Surface:
+    global _danger_grad
+    if _danger_grad is None:
+        surf = pygame.Surface((WIDTH, DANGER_GRAD_H), pygame.SRCALPHA)
+        for yy in range(DANGER_GRAD_H):
+            a = int(85 * (yy / DANGER_GRAD_H) ** 2)
+            pygame.draw.line(surf, (255, 40, 30, a), (0, yy), (WIDTH, yy))
+        _danger_grad = surf
+    return _danger_grad
 
 
 def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
@@ -61,10 +108,7 @@ def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
     radius = int(BRICK_SIZE * rfactor)
     pygame.draw.circle(screen, color, (cx, cy), radius)
     if ptype == "mine":
-        pygame.draw.circle(screen, (255, 200, 200), (cx, cy), radius, 2)
-    elif ptype == "fireball":
-        pygame.draw.circle(screen, (255, 200, 50), (cx, cy),
-                           int(BRICK_SIZE * 0.14))
+        pygame.draw.circle(screen, (220, 60, 60), (cx, cy), radius, 2)
     txt = font.render(label, True, BG_COLOR)
     screen.blit(txt, txt.get_rect(center=(cx, cy)))
 
@@ -110,6 +154,31 @@ def brick_color(hp: int) -> tuple[int, int, int]:
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
+def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
+                 h: float) -> list[tuple[float, float]] | None:
+    """Polygon vertices for a brick shape with half-size h, or None for
+    shapes drawn as a circle/rect (round, square, wide, tall)."""
+    if shape == "diamond":
+        return [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
+    if shape == "hexagon":
+        return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
+                 cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
+                for i in range(6)]
+    if shape == "trapezoid":
+        tw = h * 0.6
+        return [(cx - tw, cy - h), (cx + tw, cy - h),
+                (cx + h, cy + h), (cx - h, cy + h)]
+    if shape == "triangle":
+        if tri_dir == "up":
+            return [(cx, cy - h), (cx + h, cy + h), (cx - h, cy + h)]
+        if tri_dir == "down":
+            return [(cx - h, cy - h), (cx + h, cy - h), (cx, cy + h)]
+        if tri_dir == "left":
+            return [(cx - h, cy), (cx + h, cy - h), (cx + h, cy + h)]
+        return [(cx - h, cy - h), (cx - h, cy + h), (cx + h, cy)]
+    return None
+
+
 def draw_brick(screen: pygame.Surface, brick: Brick,
                font: pygame.font.Font, y_offset: float = 0,
                danger: bool = False, time: float = 0.0,
@@ -145,52 +214,24 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         b = int(color[2] * (1 - pulse * 0.7))
         color = (r, g, b)
 
+    # Skull sweep: bright purple-white flash fading out
+    if brick.flash > 0:
+        mix = 0.85 * (brick.flash / BRICK_FLASH_TIME)
+        color = tuple(int(c * (1 - mix) + f * mix)
+                      for c, f in zip(color, (235, 190, 255)))
+
     frame_color = (FREEZE_COLOR if draw_ice_frame
                    else LIGHTNING_COLOR if draw_stun_frame
+                   else TAR_COLOR if brick.slow_t > 0 and not reversing
                    else REVERSE_COLOR if draw_reverse_frame else None)
 
+    pts = shape_points(shape, brick.tri_dir, *rect.center, BRICK_SIZE / 2)
     if shape == "round":
         pygame.draw.circle(screen, color, rect.center, BRICK_SIZE // 2)
         if frame_color:
             pygame.draw.circle(screen, frame_color, rect.center,
                                BRICK_SIZE // 2 + 2, 2)
-    elif shape == "diamond":
-        cx, cy = rect.center
-        h = BRICK_SIZE // 2
-        pts = [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
-        pygame.draw.polygon(screen, color, pts)
-        if frame_color:
-            pygame.draw.polygon(screen, frame_color, pts, 2)
-    elif shape == "hexagon":
-        cx, cy = rect.center
-        r = BRICK_SIZE / 2
-        pts = [(int(cx + r * math.cos(math.pi / 6 + i * math.pi / 3)),
-                int(cy + r * math.sin(math.pi / 6 + i * math.pi / 3)))
-               for i in range(6)]
-        pygame.draw.polygon(screen, color, pts)
-        if frame_color:
-            pygame.draw.polygon(screen, frame_color, pts, 2)
-    elif shape == "trapezoid":
-        cx, cy = rect.center
-        hw, hh = BRICK_SIZE // 2, BRICK_SIZE // 2
-        tw = int(hw * 0.6)
-        pts = [(cx - tw, cy - hh), (cx + tw, cy - hh),
-               (cx + hw, cy + hh), (cx - hw, cy + hh)]
-        pygame.draw.polygon(screen, color, pts)
-        if frame_color:
-            pygame.draw.polygon(screen, frame_color, pts, 2)
-    elif shape == "triangle":
-        cx, cy = rect.center
-        h = BRICK_SIZE // 2
-        d = brick.tri_dir
-        if d == "up":
-            pts = [(cx, cy - h), (cx + h, cy + h), (cx - h, cy + h)]
-        elif d == "down":
-            pts = [(cx - h, cy - h), (cx + h, cy - h), (cx, cy + h)]
-        elif d == "left":
-            pts = [(cx - h, cy), (cx + h, cy - h), (cx + h, cy + h)]
-        else:
-            pts = [(cx - h, cy - h), (cx - h, cy + h), (cx + h, cy)]
+    elif pts is not None:  # diamond, hexagon, trapezoid, triangle
         pygame.draw.polygon(screen, color, pts)
         if frame_color:
             pygame.draw.polygon(screen, frame_color, pts, 2)
@@ -231,9 +272,10 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                                  (cx - h, cy + h), (cx + h, cy), 3)
         elif shape == "hexagon":
             r = BRICK_SIZE / 2 + 2
+            # Bottom three vertices (screen y grows downward)
             pts = [(int(cx + r * math.cos(math.pi / 6 + i * math.pi / 3)),
                     int(cy + r * math.sin(math.pi / 6 + i * math.pi / 3)))
-                   for i in range(3, 6)]
+                   for i in range(3)]
             pygame.draw.lines(screen, SHIELD_COLOR, False, pts, 3)
         elif shape == "trapezoid":
             hw = BRICK_SIZE // 2 + 2
@@ -253,6 +295,28 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
     screen.blit(txt, txt.get_rect(center=rect.center))
 
 
+def draw_dying_brick(screen: pygame.Surface, d: dict):
+    """Shrinking ghost of a killed brick."""
+    s = max(0.0, d["timer"] / DEATH_ANIM_TIME)
+    if s <= 0:
+        return
+    color = brick_color(d["hp"])
+    cx, cy = int(d["cx"]), int(d["cy"])
+    h = (BRICK_SIZE / 2) * s
+    shape = d["shape"]
+    pts = shape_points(shape, d["tri_dir"], cx, cy, h)
+    if shape == "round":
+        pygame.draw.circle(screen, color, (cx, cy), int(h))
+    elif pts is not None:  # diamond, hexagon, trapezoid, triangle
+        pygame.draw.polygon(screen, color, pts)
+    else:  # square, wide, tall — shrink the bounding box
+        w2 = h * (2.0 if shape == "wide" else 1.0)
+        h2 = h * (2.0 if shape == "tall" else 1.0)
+        rect = pygame.Rect(int(cx - w2), int(cy - h2),
+                           int(w2 * 2), int(h2 * 2))
+        pygame.draw.rect(screen, color, rect, border_radius=3)
+
+
 def draw_game(screen: pygame.Surface, game: Game,
               font: pygame.font.Font, small_font: pygame.font.Font):
     screen.fill(BG_COLOR)
@@ -262,16 +326,47 @@ def draw_game(screen: pygame.Surface, game: Game,
     clip = pygame.Rect(0, GRID_TOP, WIDTH, GRID_BOTTOM - GRID_TOP)
     screen.set_clip(clip)
 
+    draw_starfield(screen, game.game_time)
+
+    # Red danger glow at the bottom — fades in as the lowest brick
+    # enters the last three rows, full strength at the death line
+    if game.bricks:
+        lowest = max(GRID_TOP + (b.row + 1) * CELL_SIZE + b.extra_height
+                     + game._brick_off(b) for b in game.bricks)
+        p = (lowest - (GRID_BOTTOM - DANGER_GRAD_H)) / DANGER_GRAD_H
+        if p > 0:
+            grad = _danger_gradient()
+            grad.set_alpha(int(255 * min(1.0, p)))
+            screen.blit(grad, (0, GRID_BOTTOM - DANGER_GRAD_H))
+
     # Bricks (per-brick offset for wall blocking)
     danger_y = GRID_BOTTOM - CELL_SIZE
     for brick in game.bricks:
         boff = game._brick_off(brick)
+        # Spawn slide-in: start one cell up, behind the HUD (visual only)
+        if brick.spawn_t > 0:
+            boff -= CELL_SIZE * (brick.spawn_t / SPAWN_ANIM_TIME)
         bottom = (GRID_TOP + (brick.row + 1) * CELL_SIZE
                   + brick.extra_height + boff)
         danger = bottom >= danger_y
         draw_brick(screen, brick, small_font, boff, danger, game.game_time,
                    game.freeze_timer > 0, brick.acid_t > 0,
                    game.reverse_timer > 0, brick.stun > 0)
+
+    # Dying bricks (shrink out)
+    for d in game.dying_bricks:
+        draw_dying_brick(screen, d)
+
+    # Sticky charges riding bricks: blinking mine dot
+    for ch in game.sticky_charges:
+        b = ch["brick"]
+        if b not in game.bricks:
+            continue
+        rect = cell_rect(b.col, b.row, b.shape, game._brick_off(b))
+        blink = int(ch["timer"] * 8) % 2 == 0
+        dot = (255, 70, 70) if blink else MINE_COLOR
+        pygame.draw.circle(screen, dot,
+                           (rect.centerx + 14, rect.centery - 14), 5)
 
     # Field pickups
     for pu in game.pickups:
@@ -283,9 +378,9 @@ def draw_game(screen: pygame.Surface, game: Game,
         mx, my = int(mine["x"]), int(mine["y"])
         pygame.draw.circle(screen, MINE_COLOR, (mx, my), 10)
         pygame.draw.circle(screen, (255, 100, 100), (mx, my), 10, 2)
-        pygame.draw.line(screen, (255, 200, 200),
+        pygame.draw.line(screen, (200, 40, 40),
                          (mx - 4, my - 4), (mx + 4, my + 4), 2)
-        pygame.draw.line(screen, (255, 200, 200),
+        pygame.draw.line(screen, (200, 40, 40),
                          (mx - 4, my + 4), (mx + 4, my - 4), 2)
 
     # Placed acid zones (stationary, green pulsing circle)
@@ -370,6 +465,12 @@ def draw_game(screen: pygame.Surface, game: Game,
                 pcolor = FIREBALL_COLOR
             elif p.homing:
                 pcolor = HOMING_COLOR
+            elif p.tar:
+                pcolor = TAR_COLOR
+            elif p.acid:
+                pcolor = MORTAR_ACID_COLOR
+            elif p.wallshot:
+                pcolor = MORTAR_WALL_COLOR
             else:
                 pcolor = TEXT_COLOR
             pygame.draw.circle(screen, pcolor,
@@ -385,7 +486,7 @@ def draw_game(screen: pygame.Surface, game: Game,
         x = sx + (tx - sx) * t
         arc_height = min(150, math.hypot(tx - sx, ty - sy) * 0.4)
         y = sy + (ty - sy) * t - arc_height * math.sin(t * math.pi)
-        sc = MORTAR_STYLE.get(shell["type"], (TEXT_COLOR, "?"))[0]
+        sc = AMMO_STYLE.get(shell["type"], (TEXT_COLOR, "?"))[0]
         pygame.draw.circle(screen, sc, (int(x), int(y)), 6)
         # Trail
         if t > 0.05:
@@ -412,15 +513,19 @@ def draw_game(screen: pygame.Surface, game: Game,
     gy = GRID_BOTTOM
     pygame.draw.circle(screen, AMMO_COLOR, (gx, gy), 8)
     if game.phase in ("playing", "paused"):
-        aim_len = 40
-        ax = gx + math.cos(game.aim_angle) * aim_len
-        ay = gy + math.sin(game.aim_angle) * aim_len
+        ax = gx + math.cos(game.aim_angle) * GUN_BARREL_LEN
+        ay = gy + math.sin(game.aim_angle) * GUN_BARREL_LEN
         pygame.draw.line(screen, AMMO_COLOR, (gx, gy), (int(ax), int(ay)), 2)
 
-    # --- Crosshair ---
+    # --- Crosshair (dark outline under a bright stroke for contrast) ---
     if game.phase == "playing":
         mx, my = game.crosshair
         size = 12
+        pygame.draw.line(screen, CROSSHAIR_OUTLINE,
+                         (mx - size, my), (mx + size, my), 5)
+        pygame.draw.line(screen, CROSSHAIR_OUTLINE,
+                         (mx, my - size), (mx, my + size), 5)
+        pygame.draw.circle(screen, CROSSHAIR_OUTLINE, (mx, my), size, 3)
         pygame.draw.line(screen, CROSSHAIR_COLOR,
                          (mx - size, my), (mx + size, my), 2)
         pygame.draw.line(screen, CROSSHAIR_COLOR,
@@ -470,45 +575,55 @@ def draw_game(screen: pygame.Surface, game: Game,
     volley = game.volley_size()
     if volley > 1 and available > 0:
         ammo_label += f" ({volley}x)"
-    count_color = (FIREBALL_COLOR if game.fireball_charges > 0
-                   else HOMING_COLOR if game.homing_charges > 0
+    count_color = (AMMO_STYLE[game.gun_queue[0]][0] if game.gun_queue
                    else AMMO_COLOR)
+    if game.ammo_flash > 0:
+        # Skull just cut the pool: pulse the count purple
+        mix = ((0.5 + 0.5 * math.sin(game.game_time * 14))
+               * game.ammo_flash / AMMO_FLASH_TIME)
+        count_color = tuple(int(c * (1 - mix) + s * mix)
+                            for c, s in zip(count_color, SKULL_COLOR))
     count_txt = font.render(ammo_label, True, count_color)
     screen.blit(count_txt, (12 + 5 * 16 + 6, bullet_cy - 12))
 
-    # Charges / in-flight / reloading indicator
+    # In-flight / reloading / gun load indicator
     sub_parts: list[str] = []
-    if game.fireball_charges > 0:
-        sub_parts.append(f"F:{game.fireball_charges}")
-    if game.homing_charges > 0:
-        sub_parts.append(f"H:{game.homing_charges}")
     if in_flight > 0:
         sub_parts.append(f"{in_flight} flying")
     if game.gun_reloading > 0:
         sub_parts.append(f"{game.gun_reloading} reload")
+    if game.gun_queue:
+        # Compress the queue into per-type counts in firing order
+        runs: dict[str, int] = {}
+        for t in game.gun_queue:
+            runs[t] = runs.get(t, 0) + 1
+        load = " ".join(f"{AMMO_STYLE[t][1]}{n}" for t, n in runs.items())
+        sub_parts.append(f"load {load}")
     if game.ammo_debt > 0:
         sub_parts.append(f"-{game.ammo_debt} skull")
     if sub_parts:
         fly_txt = small_font.render("  ".join(sub_parts), True, (130, 130, 160))
         screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 6))
 
-    # Mortar ammo — one slot per type (right side), ring marks selection
-    slot_w = 50
-    mortar_start_x = WIDTH - len(MORTAR_TYPES) * slot_w + 12
-    for i, mtype in enumerate(MORTAR_TYPES):
-        mx = mortar_start_x + i * slot_w
-        count = game.mortar_ammo[mtype]
-        color, label = MORTAR_STYLE[mtype]
+    # Shared ammo — one slot per type (right side), ring marks
+    # selection, count sits below the type ball
+    slot_w = 40
+    slot_cy = GRID_BOTTOM + 20
+    ammo_start_x = WIDTH - len(AMMO_TYPES) * slot_w + 14
+    for i, mtype in enumerate(AMMO_TYPES):
+        mx = ammo_start_x + i * slot_w
+        count = game.ammo_inv[mtype]
+        color, label = AMMO_STYLE[mtype]
         if count <= 0:
             color = (60, 60, 75)
-        pygame.draw.circle(screen, color, (mx, bullet_cy), 11)
-        if i == game.mortar_sel:
-            pygame.draw.circle(screen, TEXT_COLOR, (mx, bullet_cy), 14, 2)
+        pygame.draw.circle(screen, color, (mx, slot_cy), 11)
+        if i == game.ammo_sel:
+            pygame.draw.circle(screen, TEXT_COLOR, (mx, slot_cy), 14, 2)
         t = small_font.render(label, True, BG_COLOR)
-        screen.blit(t, t.get_rect(center=(mx, bullet_cy)))
+        screen.blit(t, t.get_rect(center=(mx, slot_cy)))
         cnt_color = TEXT_COLOR if count > 0 else (100, 100, 120)
-        cnt = small_font.render(f"x{count}", True, cnt_color)
-        screen.blit(cnt, (mx + 14, bullet_cy - 8))
+        cnt = small_font.render(str(count), True, cnt_color)
+        screen.blit(cnt, cnt.get_rect(center=(mx, slot_cy + 24)))
 
     # --- Pause overlay ---
     if game.phase == "paused":
@@ -546,6 +661,7 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
               highscore: int) -> tuple[pygame.Rect, pygame.Rect]:
     """Returns (play button rect, help button rect)."""
     screen.fill(BG_COLOR)
+    draw_starfield(screen, pygame.time.get_ticks() / 1000.0, 0, HEIGHT)
 
     title = font.render("BRICKS RT", True, TEXT_COLOR)
     screen.blit(title, title.get_rect(center=(WIDTH // 2, HEIGHT // 3 - 40)))
@@ -574,7 +690,10 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
     controls = [
         "Left click / hold — Fire gun",
         "Right click — Fire mortar",
-        "Scroll / 1-4 — Select mortar type",
+        "Scroll / 1-6 — Select ammo type",
+        "R — Load gun: 1 unit = 5 bullets of it",
+        "Q — Panic mortars at lowest row",
+        "W — Panic gun: load all types",
         "Space — Pause",
         "Esc — Menu",
     ]
@@ -590,6 +709,7 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
               small_font: pygame.font.Font):
     """Pickup legend: every field icon with its effect and unlock wave."""
     screen.fill(BG_COLOR)
+    draw_starfield(screen, pygame.time.get_ticks() / 1000.0, 0, HEIGHT)
 
     title = font.render("PICKUPS", True, TEXT_COLOR)
     screen.blit(title, title.get_rect(center=(WIDTH // 2, 40)))
@@ -616,17 +736,20 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
         return lambda ry: draw_pickup_icon(screen, small_font, ptype,
                                            icon_x, ry)
 
-    header("FIELD PICKUPS — shoot to collect")
-    row(pickup("ammo"), "Ammo — +1 gun ammo")
-    row(pickup("mine"), f"Mine — +1 mortar mine (wave {UNLOCK['mines']}+)")
-    row(pickup("wall"), f"Wall — +1 mortar wall (wave {UNLOCK['wall']}+)")
-    row(pickup("bomb"), f"Bomb — +1 mortar bomb (wave {UNLOCK['bombs']}+)")
-    row(pickup("tar"), f"Tar — +1 mortar tar (wave {UNLOCK['tar']}+)")
-    row(pickup("fireball"),
-        f"Fireball — next 5 shots pierce (wave {UNLOCK['fireball']}+)")
-    row(pickup("acid"), f"Acid — +1 mortar acid (wave {UNLOCK['acid']}+)")
+    header("AMMO — 1 unit: right click = mortar, R = load gun (5 shots)")
+    row(pickup("ammo"), "Ammo — +1 gun ball (gun only)")
+    row(pickup("mine"),
+        f"Mine — contact trap / sticky blast (wave {UNLOCK['mines']}+)")
+    row(pickup("wall"),
+        f"Wall — barrier / stop brick 2s (wave {UNLOCK['wall']}+)")
+    row(pickup("bomb"),
+        f"Bomb — area blast / piercing fire (wave {UNLOCK['bombs']}+)")
+    row(pickup("tar"),
+        f"Tar — slow zone 8s / slow 15% per hit (wave {UNLOCK['tar']}+)")
+    row(pickup("acid"),
+        f"Acid — melts shields then hp, 1/s (wave {UNLOCK['acid']}+)")
     row(pickup("homing"),
-        f"Homing — next 5 shots steer (wave {UNLOCK['homing']}+)")
+        f"Homing — rocket / steering shots (wave {UNLOCK['homing']}+)")
 
     y += 8
     header("AOE — shoot it, or it fires when a brick touches it")
@@ -635,22 +758,9 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(lambda ry: draw_reverse_icon(screen, icon_x, ry),
         f"Reverse — bricks retreat 3s (wave {UNLOCK['reverse']}+)")
     row(lambda ry: draw_lightning_icon(screen, icon_x, ry),
-        f"Lightning — zaps + stuns 6 bricks 1s (wave {UNLOCK['lightning']}+)")
+        f"Lightning — zaps + stuns 6 bricks 2s (wave {UNLOCK['lightning']}+)")
     row(lambda ry: draw_skull_icon(screen, icon_x, ry),
         "Skull — halves brick HP/shields + ammo (10 min+)")
-
-    y += 8
-    header("MORTAR — right click, targets the crosshair")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "mine", icon_x, ry),
-        "Mine — lands armed, explodes on brick contact")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "wall", icon_x, ry),
-        "Wall — barrier that holds bricks until overloaded")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "bomb", icon_x, ry),
-        "Bomb — area damage, chains to other bombs")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "tar", icon_x, ry),
-        "Tar — zone that halves brick speed for 8s")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "acid", icon_x, ry),
-        "Acid — damage zone, ticks for 5s")
 
     hint = small_font.render("Click or Esc to return", True, (180, 180, 180))
     screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 30)))
