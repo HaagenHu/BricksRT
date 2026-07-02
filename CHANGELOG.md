@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.2 — Mortar order (2026-07-02)
+
+- Mortar types reordered to match unlock sequence (mine, wall, bomb,
+  tar, acid) — HUD slots, keys 1-5, cycling, and help screen follow
+- Pickup unlocks doubled: one new type every 10th wave — mine 10,
+  wall 20, bomb 30, tar 40, fireball 50, acid 60, freeze 70,
+  reverse 80, lightning 90, homing 100
+
 ## v0.3.1 — Lightning rebalance, volley scaling (2026-07-02)
 
 - Pickup unlocks respread: one new type every 5th wave — mines 5,

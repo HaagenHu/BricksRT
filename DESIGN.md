@@ -45,10 +45,11 @@ Fires arcing projectile to crosshair position. Slower cooldown (0.6s), limited a
 
 | Ammo Type | Effect | Source |
 |-----------|--------|--------|
-| Bomb | Explodes at target, area damage | Pickup |
-| Acid | Area DoT at target position | Pickup |
-| Wall | Places energy barrier blocking brick column | Pickup |
-| Tar | Zone that halves brick advance speed for 8s | Pickup (wave 20+) |
+| Mine | Lands armed, explodes on brick contact | Pickup (wave 10+) |
+| Wall | Places energy barrier blocking brick column | Pickup (wave 20+) |
+| Bomb | Explodes at target, area damage | Pickup (wave 30+) |
+| Tar | Zone that halves brick advance speed for 8s | Pickup (wave 40+) |
+| Acid | Area DoT at target position | Pickup (wave 60+) |
 
 - Mortar ammo is collected per type, not infinite
 - Type is selected with scroll wheel or number keys 1-5; firing with an
@@ -66,7 +67,7 @@ touches it).
 |------|--------|--------|
 | Freeze | Stops all brick advancement for 5 seconds | Pickup |
 | Reverse | Bricks move upward for 3 seconds | Pickup |
-| Lightning | Zaps 6 random bricks (wave/5 dmg) and stuns them 1s | Pickup (wave 45+) |
+| Lightning | Zaps 6 random bricks (wave/5 dmg) and stuns them 1s | Pickup (wave 90+) |
 | Skull | Halves brick HP/shields AND total gun ammo (incl. in-flight) | Spawns in bottom rows every 5 min after 10 min |
 
 ---

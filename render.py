@@ -641,16 +641,16 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
 
     y += 8
     header("MORTAR — right click, targets the crosshair")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "bomb", icon_x, ry),
-        "Bomb — area damage, chains to other bombs")
     row(lambda ry: draw_pickup_icon(screen, small_font, "mine", icon_x, ry),
         "Mine — lands armed, explodes on brick contact")
-    row(lambda ry: draw_pickup_icon(screen, small_font, "acid", icon_x, ry),
-        "Acid — damage zone, ticks for 5s")
     row(lambda ry: draw_pickup_icon(screen, small_font, "wall", icon_x, ry),
         "Wall — barrier that holds bricks until overloaded")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "bomb", icon_x, ry),
+        "Bomb — area damage, chains to other bombs")
     row(lambda ry: draw_pickup_icon(screen, small_font, "tar", icon_x, ry),
         "Tar — zone that halves brick speed for 8s")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "acid", icon_x, ry),
+        "Acid — damage zone, ticks for 5s")
 
     hint = small_font.render("Click or Esc to return", True, (180, 180, 180))
     screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 30)))

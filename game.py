@@ -89,14 +89,15 @@ SKULL_ROWS = 4          # skulls spawn only in the bottom N usable rows
 
 MERGE_CHANCE = 0.25  # chance a spawning square fuses with the one below
 
-MORTAR_TYPES = ["bomb", "mine", "acid", "wall", "tar"]
+# Ordered by unlock wave — HUD slots and keys 1-5 follow this order
+MORTAR_TYPES = ["mine", "wall", "bomb", "tar", "acid"]
 MORTAR_COOLDOWN = 0.6  # seconds between mortar shots
 
 # Unlock thresholds (wave number)
 UNLOCK = {
-    # Pickups: one new type every 5th wave
-    "mines": 5, "wall": 10, "bombs": 15, "tar": 20, "fireball": 25,
-    "acid": 30, "freeze": 35, "reverse": 40, "lightning": 45, "homing": 50,
+    # Pickups: one new type every 10th wave
+    "mines": 10, "wall": 20, "bombs": 30, "tar": 40, "fireball": 50,
+    "acid": 60, "freeze": 70, "reverse": 80, "lightning": 90, "homing": 100,
     # Brick shapes and properties
     "round": 15, "diamond": 15,
     "hexagon": 30, "trapezoid": 30, "wide": 30,
