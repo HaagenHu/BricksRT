@@ -3,7 +3,7 @@
 import pygame
 
 from game import FPS, HEIGHT, WIDTH, Game
-from render import draw_game, draw_menu
+from render import draw_game, draw_help, draw_menu
 
 MORTAR_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3}
 
@@ -19,6 +19,8 @@ def main():
 
     game = Game()
     play_rect: pygame.Rect | None = None
+    help_rect: pygame.Rect | None = None
+    show_help = False
     mouse_held = False
 
     running = True
@@ -34,8 +36,12 @@ def main():
                 mouse_held = True
                 mx, my = event.pos
                 if game.phase == "menu":
-                    if play_rect and play_rect.collidepoint(mx, my):
+                    if show_help:
+                        show_help = False
+                    elif play_rect and play_rect.collidepoint(mx, my):
                         game.start()
+                    elif help_rect and help_rect.collidepoint(mx, my):
+                        show_help = True
                 elif game.phase == "gameover":
                     game.phase = "menu"
 
@@ -59,14 +65,20 @@ def main():
                 if event.key in MORTAR_KEYS and game.phase == "playing":
                     game.select_mortar(MORTAR_KEYS[event.key])
                 if event.key == pygame.K_ESCAPE:
-                    if game.phase in ("playing", "paused"):
+                    if show_help:
+                        show_help = False
+                    elif game.phase in ("playing", "paused"):
                         game.save_if_record()
                         game.phase = "menu"
 
         mouse_pos = pygame.mouse.get_pos()
 
         if game.phase == "menu":
-            play_rect = draw_menu(screen, font, small_font, game.highscore)
+            if show_help:
+                draw_help(screen, font, small_font)
+            else:
+                play_rect, help_rect = draw_menu(screen, font, small_font,
+                                                 game.highscore)
             pygame.display.flip()
             continue
 

@@ -8,7 +8,7 @@ import pygame
 from game import (
     WIDTH, HEIGHT, TOP_UI_HEIGHT, BOTTOM_AREA_HEIGHT, GRID_TOP, GRID_BOTTOM,
     CELL_SIZE, BRICK_SIZE, PROJECTILE_RADIUS, BOMB_RADIUS_CELLS,
-    ACID_RADIUS_CELLS, MORTAR_TYPES, Brick, Game, cell_rect,
+    ACID_RADIUS_CELLS, MORTAR_TYPES, UNLOCK, Brick, Game, cell_rect,
 )
 
 # Colors
@@ -27,6 +27,8 @@ FREEZE_COLOR = (150, 230, 255)
 REVERSE_COLOR = (255, 80, 80)
 FIREBALL_COLOR = (255, 100, 0)
 HOMING_COLOR = (0, 255, 150)
+LIGHTNING_COLOR = (255, 240, 120)
+SKULL_COLOR = (200, 100, 255)
 GAMEOVER_OVERLAY = (0, 0, 0, 180)
 HUD_BG = (30, 30, 45)
 
@@ -47,6 +49,51 @@ MORTAR_STYLE = {
     "acid": (MORTAR_ACID_COLOR, "A"),
     "wall": (MORTAR_WALL_COLOR, "W"),
 }
+
+
+def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
+                     ptype: str, cx: int, cy: int):
+    color, label, rfactor = PICKUP_STYLE[ptype]
+    radius = int(BRICK_SIZE * rfactor)
+    pygame.draw.circle(screen, color, (cx, cy), radius)
+    if ptype == "mine":
+        pygame.draw.circle(screen, (255, 200, 200), (cx, cy), radius, 2)
+    elif ptype == "fireball":
+        pygame.draw.circle(screen, (255, 200, 50), (cx, cy),
+                           int(BRICK_SIZE * 0.14))
+    txt = font.render(label, True, BG_COLOR)
+    screen.blit(txt, txt.get_rect(center=(cx, cy)))
+
+
+def draw_freeze_icon(screen: pygame.Surface, fx: int, fy: int):
+    # Snowflake: 3 crossing lines
+    size = 10
+    for i in range(3):
+        angle = i * math.pi / 3
+        dx = int(size * math.cos(angle))
+        dy = int(size * math.sin(angle))
+        pygame.draw.line(screen, FREEZE_COLOR,
+                         (fx - dx, fy - dy), (fx + dx, fy + dy), 2)
+
+
+def draw_reverse_icon(screen: pygame.Surface, rx: int, ry: int):
+    # Up arrow
+    pygame.draw.line(screen, REVERSE_COLOR, (rx, ry + 8), (rx, ry - 8), 2)
+    pygame.draw.line(screen, REVERSE_COLOR, (rx - 5, ry - 3), (rx, ry - 8), 2)
+    pygame.draw.line(screen, REVERSE_COLOR, (rx + 5, ry - 3), (rx, ry - 8), 2)
+
+
+def draw_lightning_icon(screen: pygame.Surface, lx: int, ly: int):
+    pts = [(lx + 4, ly - 9), (lx - 3, ly - 1), (lx + 1, ly - 1),
+           (lx - 4, ly + 9)]
+    pygame.draw.lines(screen, LIGHTNING_COLOR, False, pts, 3)
+
+
+def draw_skull_icon(screen: pygame.Surface, sx: int, sy: int):
+    pygame.draw.circle(screen, SKULL_COLOR, (sx, sy - 1), 9)
+    pygame.draw.rect(screen, SKULL_COLOR, (sx - 5, sy + 4, 10, 5))
+    pygame.draw.circle(screen, BG_COLOR, (sx - 3, sy - 2), 2)
+    pygame.draw.circle(screen, BG_COLOR, (sx + 3, sy - 2), 2)
 
 
 def brick_color(hp: int) -> tuple[int, int, int]:
@@ -169,11 +216,13 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                 pygame.draw.lines(screen, SHIELD_COLOR, False, [
                     (cx - h // 2, cy), (cx, cy + h), (cx + h // 2, cy)], 3)
             elif d == "left":
-                pygame.draw.lines(screen, SHIELD_COLOR, False, [
-                    (cx + h, cy), (cx - h, cy), (cx + h, cy + h)], 3)
+                # Bottom slant: apex (left) to bottom-right corner
+                pygame.draw.line(screen, SHIELD_COLOR,
+                                 (cx - h, cy), (cx + h, cy + h), 3)
             else:
-                pygame.draw.lines(screen, SHIELD_COLOR, False, [
-                    (cx - h, cy), (cx + h, cy), (cx - h, cy + h)], 3)
+                # Bottom slant: bottom-left corner to apex (right)
+                pygame.draw.line(screen, SHIELD_COLOR,
+                                 (cx - h, cy + h), (cx + h, cy), 3)
         elif shape == "hexagon":
             r = BRICK_SIZE / 2 + 2
             pts = [(int(cx + r * math.cos(math.pi / 6 + i * math.pi / 3)),
@@ -220,18 +269,8 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     # Field pickups
     for pu in game.pickups:
-        color, label, rfactor = PICKUP_STYLE[pu["type"]]
         rect = cell_rect(pu["col"], pu["row"], "square", off)
-        cx, cy = rect.center
-        radius = int(BRICK_SIZE * rfactor)
-        pygame.draw.circle(screen, color, (cx, cy), radius)
-        if pu["type"] == "mine":
-            pygame.draw.circle(screen, (255, 200, 200), (cx, cy), radius, 2)
-        elif pu["type"] == "fireball":
-            pygame.draw.circle(screen, (255, 200, 50), (cx, cy),
-                               int(BRICK_SIZE * 0.14))
-        txt = small_font.render(label, True, BG_COLOR)
-        screen.blit(txt, txt.get_rect(center=(cx, cy)))
+        draw_pickup_icon(screen, small_font, pu["type"], *rect.center)
 
     # Placed mines (stationary, waiting for brick contact)
     for mine in game.placed_mines:
@@ -270,25 +309,22 @@ def draw_game(screen: pygame.Surface, game: Game,
                                    True, MORTAR_WALL_COLOR)
         screen.blit(wt_txt, (4, wy + 4))
 
-    # Placed freezes (stationary snowflake icon)
+    # Placed AoE pickups (stationary icons)
     for fz in game.placed_freezes:
-        fx, fy = int(fz["x"]), int(fz["y"])
-        # Snowflake: 3 crossing lines
-        size = 10
-        for i in range(3):
-            angle = i * math.pi / 3
-            dx = int(size * math.cos(angle))
-            dy = int(size * math.sin(angle))
-            pygame.draw.line(screen, FREEZE_COLOR,
-                             (fx - dx, fy - dy), (fx + dx, fy + dy), 2)
-
-    # Placed reverses (stationary, red arrow-up icon)
+        draw_freeze_icon(screen, int(fz["x"]), int(fz["y"]))
     for rv in game.placed_reverses:
-        rx, ry = int(rv["x"]), int(rv["y"])
-        # Up arrow
-        pygame.draw.line(screen, REVERSE_COLOR, (rx, ry + 8), (rx, ry - 8), 2)
-        pygame.draw.line(screen, REVERSE_COLOR, (rx - 5, ry - 3), (rx, ry - 8), 2)
-        pygame.draw.line(screen, REVERSE_COLOR, (rx + 5, ry - 3), (rx, ry - 8), 2)
+        draw_reverse_icon(screen, int(rv["x"]), int(rv["y"]))
+    for lt in game.placed_lightnings:
+        draw_lightning_icon(screen, int(lt["x"]), int(lt["y"]))
+    for sk in game.placed_skulls:
+        draw_skull_icon(screen, int(sk["x"]), int(sk["y"]))
+
+    # Lightning bolts (brief jagged flashes)
+    for bolt in game.lightning_bolts:
+        pts = [(int(x), int(y)) for x, y in bolt["points"]]
+        if len(pts) >= 2:
+            pygame.draw.lines(screen, LIGHTNING_COLOR, False, pts, 3)
+            pygame.draw.lines(screen, TEXT_COLOR, False, pts, 1)
 
     # Reverse wave visual (horizontal line radiates upward from bottom)
     if game.reverse_wave:
@@ -301,15 +337,16 @@ def draw_game(screen: pygame.Surface, game: Game,
             surf.fill((*REVERSE_COLOR, alpha))
             screen.blit(surf, (0, line_y))
 
-    # Freeze wave visual
-    if game.freeze_wave:
-        fw = game.freeze_wave
-        r = int(fw["radius"])
-        if r > 0:
-            alpha = max(0, min(180, int(180 * (1 - fw["radius"] / fw["max_radius"]))))
-            surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-            pygame.draw.circle(surf, (*FREEZE_COLOR, alpha), (r, r), r, 3)
-            screen.blit(surf, (int(fw["x"]) - r, int(fw["y"]) - r))
+    # Freeze/skull wave visuals (expanding circles)
+    for wave, wcolor in ((game.freeze_wave, FREEZE_COLOR),
+                         (game.skull_wave, SKULL_COLOR)):
+        if wave:
+            r = int(wave["radius"])
+            if r > 0:
+                alpha = max(0, min(180, int(180 * (1 - wave["radius"] / wave["max_radius"]))))
+                surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (*wcolor, alpha), (r, r), r, 3)
+                screen.blit(surf, (int(wave["x"]) - r, int(wave["y"]) - r))
 
     # Projectiles
     for p in game.projectiles:
@@ -431,6 +468,8 @@ def draw_game(screen: pygame.Surface, game: Game,
         sub_parts.append(f"{in_flight} flying")
     if game.gun_reloading > 0:
         sub_parts.append(f"{game.gun_reloading} reload")
+    if game.ammo_debt > 0:
+        sub_parts.append(f"-{game.ammo_debt} skull")
     if sub_parts:
         fly_txt = small_font.render("  ".join(sub_parts), True, (130, 130, 160))
         screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 6))
@@ -485,7 +524,9 @@ def draw_game(screen: pygame.Surface, game: Game,
 
 
 def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
-              small_font: pygame.font.Font, highscore: int) -> pygame.Rect:
+              small_font: pygame.font.Font,
+              highscore: int) -> tuple[pygame.Rect, pygame.Rect]:
+    """Returns (play button rect, help button rect)."""
     screen.fill(BG_COLOR)
 
     title = font.render("BRICKS RT", True, TEXT_COLOR)
@@ -500,10 +541,17 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
     play_txt = font.render("PLAY", True, TEXT_COLOR)
     screen.blit(play_txt, play_txt.get_rect(center=play_rect.center))
 
+    # Help button
+    help_rect = pygame.Rect(WIDTH // 2 - 60, HEIGHT // 2 + 44, 120, 36)
+    pygame.draw.rect(screen, (45, 45, 70), help_rect, border_radius=8)
+    pygame.draw.rect(screen, (150, 150, 180), help_rect, 2, border_radius=8)
+    help_txt = small_font.render("HELP", True, TEXT_COLOR)
+    screen.blit(help_txt, help_txt.get_rect(center=help_rect.center))
+
     if highscore > 0:
         hs_txt = small_font.render(f"Best: Wave {highscore}", True, (150, 150, 180))
         screen.blit(hs_txt,
-                    hs_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 60)))
+                    hs_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 106)))
 
     controls = [
         "Left click / hold — Fire gun",
@@ -515,6 +563,76 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
     for i, line in enumerate(controls):
         t = small_font.render(line, True, (110, 110, 140))
         screen.blit(t, t.get_rect(center=(WIDTH // 2,
-                                          HEIGHT * 2 // 3 + i * 24)))
+                                          HEIGHT * 2 // 3 + 20 + i * 24)))
 
-    return play_rect
+    return play_rect, help_rect
+
+
+def draw_help(screen: pygame.Surface, font: pygame.font.Font,
+              small_font: pygame.font.Font):
+    """Pickup legend: every field icon with its effect and unlock wave."""
+    screen.fill(BG_COLOR)
+
+    title = font.render("PICKUPS", True, TEXT_COLOR)
+    screen.blit(title, title.get_rect(center=(WIDTH // 2, 40)))
+
+    icon_x, text_x = 40, 68
+    header_color = (150, 150, 180)
+    text_color = (200, 200, 215)
+    y = 84
+
+    def header(label: str):
+        nonlocal y
+        t = small_font.render(label, True, header_color)
+        screen.blit(t, (24, y))
+        y += 30
+
+    def row(icon_fn, desc: str):
+        nonlocal y
+        icon_fn(y)
+        t = small_font.render(desc, True, text_color)
+        screen.blit(t, (text_x, y - 9))
+        y += 30
+
+    def pickup(ptype):
+        return lambda ry: draw_pickup_icon(screen, small_font, ptype,
+                                           icon_x, ry)
+
+    header("FIELD PICKUPS — shoot to collect")
+    row(pickup("ammo"), "Ammo — +1 gun ammo")
+    row(pickup("mine"), f"Mine — +1 mortar mine (wave {UNLOCK['mines']}+)")
+    row(pickup("wall"), f"Wall — +1 mortar wall (wave {UNLOCK['wall']}+)")
+    row(pickup("bomb"), f"Bomb — +1 mortar bomb (wave {UNLOCK['bombs']}+)")
+    row(pickup("fireball"),
+        f"Fireball — next 5 shots pierce (wave {UNLOCK['fireball']}+)")
+    row(pickup("acid"), f"Acid — +1 mortar acid (wave {UNLOCK['acid']}+)")
+    row(pickup("homing"),
+        f"Homing — next 5 shots steer (wave {UNLOCK['homing']}+)")
+
+    y += 10
+    header("AOE — shoot it, or it fires when a brick touches it")
+    row(lambda ry: draw_freeze_icon(screen, icon_x, ry),
+        f"Freeze — stops advance 5s (wave {UNLOCK['freeze']}+)")
+    row(lambda ry: draw_reverse_icon(screen, icon_x, ry),
+        f"Reverse — bricks retreat 3s (wave {UNLOCK['reverse']}+)")
+    row(lambda ry: draw_lightning_icon(screen, icon_x, ry),
+        f"Lightning — strikes 6 random bricks (wave {UNLOCK['lightning']}+)")
+    row(lambda ry: draw_skull_icon(screen, icon_x, ry),
+        "Skull — halves brick HP/shields AND your ammo")
+    t = small_font.render("(appears in the bottom rows after 10 minutes)",
+                          True, (130, 130, 160))
+    screen.blit(t, (text_x, y - 6))
+    y += 34
+
+    header("MORTAR — right click, targets the crosshair")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "bomb", icon_x, ry),
+        "Bomb — area damage, chains to other bombs")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "mine", icon_x, ry),
+        "Mine — lands armed, explodes on brick contact")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "acid", icon_x, ry),
+        "Acid — damage zone, ticks for 5s")
+    row(lambda ry: draw_pickup_icon(screen, small_font, "wall", icon_x, ry),
+        "Wall — barrier that holds bricks until overloaded")
+
+    hint = small_font.render("Click or Esc to return", True, (180, 180, 180))
+    screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 30)))

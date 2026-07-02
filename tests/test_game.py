@@ -61,6 +61,25 @@ def test_long_simulation_runs_clean():
     assert frames == 3600 or gm.phase == "gameover"
 
 
+def test_late_game_simulation_runs_clean():
+    random.seed(2)
+    gm = _fresh_game(wave=75)  # merging + all shapes unlocked
+    gm.game_time = g.SKULL_START  # skulls active
+    frames = 0
+    while gm.phase == "playing" and frames < 1800:
+        gm.update_aim((random.randint(0, g.WIDTH),
+                       random.randint(g.GRID_TOP, g.GRID_BOTTOM)))
+        gm.fire_gun()
+        gm.gun_ammo = 5
+        if frames % 300 == 0 and gm.bricks:
+            gm._trigger_lightning(240.0, 400.0)
+        if frames % 500 == 0:
+            gm._trigger_skull(240.0, 400.0)
+        gm.update(1 / 60)
+        frames += 1
+    assert frames == 1800 or gm.phase == "gameover"
+
+
 def test_wide_bricks_never_overlap_row0():
     random.seed(7)
     for _ in range(300):
@@ -184,6 +203,114 @@ def test_advance_rows_moves_bricks_and_pickups():
     assert gm.bricks[0].row == 3
     assert gm.pickups[0]["row"] == 4
     assert gm.wave == wave_before + 1  # advancing spawns a wave
+
+
+def test_lightning_strikes_random_bricks():
+    random.seed(11)
+    gm = _fresh_game(wave=20)
+    gm.bricks = [Brick(col=c, row=2, hp=100) for c in range(8)]
+    gm._trigger_lightning(240.0, 400.0)
+    struck = [b for b in gm.bricks if b.hp < 100]
+    assert len(struck) == g.LIGHTNING_STRIKES
+    assert all(b.hp == 100 - gm.wave for b in struck)
+    assert len(gm.lightning_bolts) == 1
+    # Bolt path visits trigger point + one center per strike (jagged between)
+    assert len(gm.lightning_bolts[0]["points"]) > g.LIGHTNING_STRIKES
+
+    # Lethal strikes remove bricks
+    gm2 = _fresh_game(wave=20)
+    gm2.bricks = [Brick(col=0, row=2, hp=1), Brick(col=1, row=2, hp=1)]
+    gm2._trigger_lightning(240.0, 400.0)
+    assert not gm2.bricks
+
+
+def test_skull_halves_hp_shields_and_ammo():
+    gm = _fresh_game(wave=80)
+    gm.bricks = [
+        Brick(col=0, row=2, hp=10, shield=4),
+        Brick(col=1, row=2, hp=1),
+        Brick(col=2, row=2, hp=7),
+    ]
+    gm.gun_ammo = 9
+    gm._trigger_skull(240.0, 400.0)
+    assert [b.hp for b in gm.bricks] == [5, 1, 3]  # floors at 1
+    assert gm.bricks[0].shield == 2
+    assert gm.gun_ammo == 4
+    assert gm.skull_wave is not None
+    # Ammo floors at 1
+    gm.gun_ammo, gm.gun_reloading, gm.ammo_debt = 1, 0, 0
+    gm._trigger_skull(240.0, 400.0)
+    assert gm.gun_ammo == 1 and gm.ammo_debt == 0
+
+
+def test_skull_halves_total_pool_no_dodge():
+    # Halving spans available + reload queue + in-flight
+    gm = _fresh_game(wave=80)
+    gm.bricks.clear()
+    gm.gun_ammo = 4
+    gm.gun_reloading = 3
+    flying = [Projectile((240, 300), (0, -g.PROJECTILE_SPEED))
+              for _ in range(2)]
+    gm.projectiles = list(flying)
+    gm._trigger_skull(240.0, 400.0)  # total 9 -> keep 4, destroy 5
+    assert gm.gun_ammo == 0
+    assert gm.gun_reloading == 2
+    assert gm.ammo_debt == 0
+
+    # Everything airborne: destruction becomes debt that eats returns
+    gm2 = _fresh_game(wave=80)
+    gm2.bricks.clear()
+    gm2.gun_ammo = 0
+    flying = [Projectile((240, 300), (0, -g.PROJECTILE_SPEED))
+              for _ in range(4)]
+    gm2.projectiles = list(flying)
+    gm2._trigger_skull(240.0, 400.0)  # total 4 -> keep 2, debt 2
+    assert gm2.ammo_debt == 2
+    for p in flying:  # all shots exit the bottom
+        p.alive = False
+        p.exited_bottom = True
+    gm2.update(1 / 60)
+    assert gm2.ammo_debt == 0
+    assert gm2.gun_reloading == 2  # only the kept half returns
+
+
+def test_skull_spawns_after_ten_minutes_in_bottom_rows():
+    gm = _fresh_game()
+    gm.bricks.clear()
+    gm.game_time = g.SKULL_START + 1
+    gm.update(1 / 60)
+    assert len(gm.placed_skulls) == 1
+    # Next one only after the interval
+    gm.update(1 / 60)
+    assert len(gm.placed_skulls) == 1
+    gm.skull_timer = 0.001
+    gm.update(1 / 60)
+    assert len(gm.placed_skulls) == 2
+    for sk in gm.placed_skulls:
+        row = int((sk["y"] - g.GRID_TOP - gm.brick_offset) // g.CELL_SIZE)
+        assert row >= g.MAX_ROWS - g.SKULL_ROWS, f"skull too high: row {row}"
+
+
+def test_merging_creates_tall_brick():
+    merged = None
+    for seed in range(200):
+        random.seed(seed)
+        gm = _fresh_game(wave=74)  # spawn_wave bumps to 75
+        gm.bricks = [Brick(col=c, row=1, hp=5) for c in range(8)]
+        gm.spawn_wave()
+        talls = [b for b in gm.bricks if b.shape == "tall"]
+        if talls:
+            merged = (gm, talls[0])
+            break
+    assert merged is not None, "no merge in 200 seeds"
+    gm, tall = merged
+    assert tall.row == 0
+    assert tall.hp == 75 + 5  # spawn HP + absorbed brick's HP
+    # The absorbed brick is gone and nothing overlaps the tall's cells
+    for b in gm.bricks:
+        if b is tall:
+            continue
+        assert not (set(b.cells()) & set(tall.cells()))
 
 
 def test_esc_save_if_record():

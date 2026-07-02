@@ -69,6 +69,15 @@ REVERSE_DURATION = 3.0  # seconds
 FIREBALL_CHARGES = 5    # shots as fireball per pickup
 HOMING_CHARGES = 5      # shots as homing per pickup
 
+LIGHTNING_STRIKES = 6      # bricks hit per lightning trigger
+LIGHTNING_BOLT_TTL = 0.35  # seconds a bolt stays visible
+
+SKULL_START = 600.0     # seconds of game time before skulls appear
+SKULL_INTERVAL = 300.0  # seconds between skull spawns
+SKULL_ROWS = 4          # skulls spawn only in the bottom N usable rows
+
+MERGE_CHANCE = 0.25  # chance a spawning square fuses with the one below
+
 MORTAR_TYPES = ["bomb", "mine", "acid", "wall"]
 MORTAR_COOLDOWN = 0.6  # seconds between mortar shots
 
@@ -77,8 +86,9 @@ UNLOCK = {
     "mines": 3, "wall": 3, "bombs": 5, "fireball": 7, "acid": 8,
     "freeze": 10, "reverse": 10, "homing": 11,
     "round": 15, "diamond": 15,
+    "lightning": 20,
     "hexagon": 30, "trapezoid": 30, "wide": 30,
-    "triangle": 50, "shields": 60,
+    "triangle": 50, "shields": 60, "merging": 70,
 }
 
 
@@ -198,6 +208,25 @@ def _apply_gravity(proj: Projectile, dt: float):
     proj.vel.y = math.sin(new_angle) * speed
 
 
+def _jagged_path(points: list[tuple[float, float]],
+                 steps: int = 5, spread: float = 8.0) -> list[tuple[float, float]]:
+    """Subdivide a polyline with random perpendicular offsets (lightning look)."""
+    out: list[tuple[float, float]] = [points[0]]
+    for (x1, y1), (x2, y2) in zip(points, points[1:]):
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1:
+            out.append((x2, y2))
+            continue
+        nx, ny = -dy / length, dx / length  # perpendicular unit
+        for i in range(1, steps):
+            t = i / steps
+            off = random.uniform(-spread, spread)
+            out.append((x1 + dx * t + nx * off, y1 + dy * t + ny * off))
+        out.append((x2, y2))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Game
 # ---------------------------------------------------------------------------
@@ -224,6 +253,7 @@ class Game:
         self.gun_cooldown = 0.0
         self.gun_reloading = 0  # ammo pending reload
         self.gun_reload_timer = 0.0
+        self.ammo_debt = 0  # skull penalty: eats returning shots
         self.projectiles: list[Projectile] = []
 
         # Mortar ammo — count per type, player selects with scroll / 1-4
@@ -249,6 +279,9 @@ class Game:
         # Stationary AoE PUs (pixel coords, ball or brick contact to trigger)
         self.placed_freezes: list[dict] = []   # {x, y}
         self.placed_reverses: list[dict] = []  # {x, y}
+        self.placed_lightnings: list[dict] = []  # {x, y}
+        self.placed_skulls: list[dict] = []      # {x, y}
+        self.skull_timer = 0.0  # counts down to next skull spawn
 
         # Aim
         self.aim_angle: float = -math.pi / 2
@@ -262,6 +295,8 @@ class Game:
         self.freeze_wave: dict | None = None  # {x, y, radius, max_radius, speed}
         self.reverse_timer = 0.0  # seconds remaining of reverse
         self.reverse_wave: dict | None = None  # {x, y, height, max_height, speed}
+        self.skull_wave: dict | None = None  # {x, y, radius, max_radius, speed}
+        self.lightning_bolts: list[dict] = []  # {points, timer}
 
         # Advance speed
         self.advance_speed = ADVANCE_SPEED_BASE
@@ -308,6 +343,28 @@ class Game:
             self.reverse_wave["height"] += self.reverse_wave["speed"] * dt
             if self.reverse_wave["height"] >= self.reverse_wave["max_height"]:
                 self.reverse_wave = None
+
+        # Skull wave animation
+        if self.skull_wave:
+            self.skull_wave["radius"] += self.skull_wave["speed"] * dt
+            if self.skull_wave["radius"] >= self.skull_wave["max_radius"]:
+                self.skull_wave = None
+
+        # Skulls spawn at intervals late in the game
+        if self.game_time >= SKULL_START:
+            self.skull_timer -= dt
+            if self.skull_timer <= 0:
+                self.skull_timer = SKULL_INTERVAL
+                # Bottom rows only: shootable early, or a natural emergency
+                # brake when bricks push far enough down to touch it
+                free = [cell for cell in self._free_cells()
+                        if cell[1] >= MAX_ROWS - SKULL_ROWS]
+                if free:
+                    c, r = random.choice(free)
+                    rect = cell_rect(c, r, "square", self.brick_offset)
+                    self.placed_skulls.append({
+                        "x": float(rect.centerx), "y": float(rect.centery),
+                    })
 
         # Gradually increase advance speed
         minutes = self.game_time / 60.0
@@ -364,16 +421,19 @@ class Game:
             if p.alive:
                 self._collide_walls(p)
             if p.alive:
-                self._collide_placed_freezes(p)
-            if p.alive:
-                self._collide_placed_reverses(p)
+                for placed, trigger in self._placed_aoe():
+                    self._collide_placed_aoe(p, placed, trigger)
 
-        # Return ammo for projectiles that exited bottom (into reload queue)
+        # Return ammo for projectiles that exited bottom (into reload queue).
+        # Skull debt eats returning shots instead of refunding them.
         for p in self.projectiles:
             if not p.alive and p.exited_bottom:
-                self.gun_reloading += 1
-                if self.gun_reload_timer <= 0:
-                    self.gun_reload_timer = GUN_RELOAD_DELAY
+                if self.ammo_debt > 0:
+                    self.ammo_debt -= 1
+                else:
+                    self.gun_reloading += 1
+                    if self.gun_reload_timer <= 0:
+                        self.gun_reload_timer = GUN_RELOAD_DELAY
                 # Nudge gun toward exit point (10% of distance)
                 self.gun_x += (p.pos.x - self.gun_x) * 0.1
                 self.gun_x = max(PROJECTILE_RADIUS,
@@ -390,9 +450,9 @@ class Game:
         # Mines: explode when any brick overlaps them
         self._check_mines()
 
-        # Freeze/reverse: also trigger on brick contact
-        self._check_placed_aoe_brick(self.placed_freezes, self._trigger_freeze)
-        self._check_placed_aoe_brick(self.placed_reverses, self._trigger_reverse)
+        # AoE pickups also trigger on brick contact
+        for placed, trigger in self._placed_aoe():
+            self._check_placed_aoe_brick(placed, trigger)
 
         # Acid zones: tick damage on nearby bricks
         self._update_acids(dt)
@@ -429,6 +489,10 @@ class Game:
         self.explosions = [e for e in self.explosions if e["timer"] > 0]
         for e in self.explosions:
             e["timer"] -= dt
+        self.lightning_bolts = [b for b in self.lightning_bolts
+                                if b["timer"] > 0]
+        for b in self.lightning_bolts:
+            b["timer"] -= dt
 
     def _steer_homing(self, p: Projectile, dt: float):
         best_dist = float('inf')
@@ -640,7 +704,8 @@ class Game:
             occupied.add((pu["col"], pu["row"]))
         # Convert pixel-based placed items to grid cells
         off = self.brick_offset
-        for p in self.placed_freezes + self.placed_reverses:
+        for p in (self.placed_freezes + self.placed_reverses
+                  + self.placed_lightnings + self.placed_skulls):
             col = int(p["x"] // CELL_SIZE)
             row = int((p["y"] - GRID_TOP - off) // CELL_SIZE)
             occupied.add((col, row))
@@ -737,6 +802,21 @@ class Game:
             shield = 0
             if self.wave >= UNLOCK["shields"] and random.random() < 0.15:
                 shield = max(2, self.wave // 5)
+
+            # Merging: a spawning square fuses with a square directly
+            # below into one tall brick with combined HP
+            if (shape == "square" and self.wave >= UNLOCK["merging"]
+                    and random.random() < MERGE_CHANCE):
+                below = next((b for b in self.bricks
+                              if b.col == c and b.row == 1
+                              and b.shape == "square"), None)
+                if below is not None:
+                    self.bricks.remove(below)
+                    self.bricks.append(Brick(
+                        col=c, row=0, hp=hp + below.hp, shape="tall",
+                        shield=max(shield, below.shield)))
+                    continue
+
             self.bricks.append(Brick(col=c, row=0, hp=hp, shape=shape,
                                      tri_dir=tri_dir, shield=shield))
 
@@ -777,6 +857,7 @@ class Game:
         # AoE PUs (pixel-based, stationary, ball hit to activate)
         _spawn_pixel("freeze", 0.12, self.placed_freezes)
         _spawn_pixel("reverse", 0.10, self.placed_reverses)
+        _spawn_pixel("lightning", 0.10, self.placed_lightnings)
 
     # ------------------------------------------------------------------
     # Aim & fire
@@ -1177,6 +1258,15 @@ class Game:
                 w["max_weight"] = max(0, w["max_weight"] - 1)
                 break
 
+    def _placed_aoe(self) -> list[tuple[list[dict], object]]:
+        """(placed list, trigger fn) pairs for all stationary AoE pickups."""
+        return [
+            (self.placed_freezes, self._trigger_freeze),
+            (self.placed_reverses, self._trigger_reverse),
+            (self.placed_lightnings, self._trigger_lightning),
+            (self.placed_skulls, self._trigger_skull),
+        ]
+
     def _trigger_freeze(self, x: float, y: float):
         self.freeze_timer = FREEZE_DURATION
         self.freeze_wave = {
@@ -1193,21 +1283,59 @@ class Game:
             "speed": 600,
         }
 
-    def _collide_placed_freezes(self, proj: Projectile):
-        """Projectile hitting a freeze activates it."""
-        bx, by = proj.pos.x, proj.pos.y
-        for fz in list(self.placed_freezes):
-            if math.hypot(bx - fz["x"], by - fz["y"]) < PROJECTILE_RADIUS + 10:
-                self.placed_freezes.remove(fz)
-                self._trigger_freeze(fz["x"], fz["y"])
+    def _trigger_lightning(self, x: float, y: float):
+        """Chain strikes from the trigger point through random bricks."""
+        if not self.bricks:
+            return
+        targets = random.sample(self.bricks,
+                                min(LIGHTNING_STRIKES, len(self.bricks)))
+        damage = max(1, self.wave)
+        points = [(x, y)]
+        for b in targets:
+            rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+            points.append(rect.center)
+            b.hp -= damage
+        self.bricks = [b for b in self.bricks if b.hp > 0]
+        self.lightning_bolts.append({
+            "points": _jagged_path(points),
+            "timer": LIGHTNING_BOLT_TTL,
+        })
 
-    def _collide_placed_reverses(self, proj: Projectile):
-        """Projectile hitting a reverse activates it."""
+    def _trigger_skull(self, x: float, y: float):
+        """Halve everything: brick HP and shields, but also gun ammo.
+
+        Ammo halving applies to the TOTAL pool (available + reloading +
+        in-flight) so dumping the magazine before the trigger doesn't
+        dodge it. What can't be taken immediately becomes debt that eats
+        shots as they return off the bottom.
+        """
+        for b in self.bricks:
+            b.hp = max(1, b.hp // 2)
+            b.shield //= 2
+        in_flight = sum(1 for p in self.projectiles if p.alive)
+        total = self.gun_ammo + self.gun_reloading + in_flight
+        destroy = total - max(1, total // 2) if total > 1 else 0
+        take = min(destroy, self.gun_ammo)
+        self.gun_ammo -= take
+        destroy -= take
+        take = min(destroy, self.gun_reloading)
+        self.gun_reloading -= take
+        destroy -= take
+        self.ammo_debt += destroy
+        self.skull_wave = {
+            "x": x, "y": y, "radius": 0,
+            "max_radius": math.hypot(WIDTH, HEIGHT),
+            "speed": 800,
+        }
+
+    def _collide_placed_aoe(self, proj: Projectile, placed: list[dict],
+                            trigger):
+        """Projectile hitting a placed AoE pickup activates it."""
         bx, by = proj.pos.x, proj.pos.y
-        for rv in list(self.placed_reverses):
-            if math.hypot(bx - rv["x"], by - rv["y"]) < PROJECTILE_RADIUS + 10:
-                self.placed_reverses.remove(rv)
-                self._trigger_reverse(rv["x"], rv["y"])
+        for item in list(placed):
+            if math.hypot(bx - item["x"], by - item["y"]) < PROJECTILE_RADIUS + 10:
+                placed.remove(item)
+                trigger(item["x"], item["y"])
 
     def _check_placed_aoe_brick(self, placed: list[dict], trigger):
         """Placed freeze/reverse activates when any brick touches it."""

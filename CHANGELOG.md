@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0 — Lightning, Skull, Merging (2026-07-02)
+
+- **Lightning** (pickup, wave 20+): chain-strikes 6 random bricks for
+  wave-level damage each, with jagged bolt visuals
+- **Skull**: spawns in the bottom rows every 5 minutes after 10 minutes
+  of play; triggering it halves every brick's HP and shields — but also
+  your total gun ammo (including reloading and in-flight shots, which
+  are consumed as they return)
+- **Merging** (wave 70+): a spawning square brick can fuse with the
+  square directly below into a tall brick with combined HP
+- AoE trigger handling (ball hit / brick contact) unified across
+  freeze, reverse, lightning, and skull
+- **Help screen**: HELP button on the menu opens a legend of every
+  pickup icon with its effect and unlock wave
+
 ## v0.2.0 — Physics fixes, mortar selection, restructure (2026-07-02)
 
 ### Gameplay

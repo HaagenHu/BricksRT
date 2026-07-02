@@ -61,8 +61,8 @@ touches it).
 |------|--------|--------|
 | Freeze | Stops all brick advancement for 5 seconds | Pickup |
 | Reverse | Bricks move upward for 3 seconds | Pickup |
-| Lightning | Chain strikes on random bricks | *Planned, not implemented* |
-| Skull | Halves everything (at high levels) | *Planned, not implemented* |
+| Lightning | Chain strikes on 6 random bricks (wave dmg each) | Pickup (wave 20+) |
+| Skull | Halves brick HP/shields AND total gun ammo (incl. in-flight) | Spawns in bottom rows every 5 min after 10 min |
 
 ---
 
@@ -75,7 +75,8 @@ Reuse all shapes from Bricks:
 ### Properties
 - HP scales with game time / wave number
 - Shields (bottom protection)
-- Merging (tall bricks from overlapping spawns) — *planned, not implemented*
+- Merging (wave 70+): a spawning square can fuse with the square below it
+  into a tall brick with combined HP
 - Rainbow color gradient by HP
 
 ### Advancement
