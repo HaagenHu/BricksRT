@@ -33,10 +33,11 @@ Fires single projectiles from the bottom center. Rapid fire with cooldown.
 - Ammo is shared pool (like ball count in Bricks)
 - Fireball/homing are temporary upgrades applied to next N shots
 - Projectiles still bounce off walls and ceiling
-- Projectile exits at bottom = lost (no return)
+- Projectile exits at bottom = ammo returns after a short reload delay,
+  and the gun drifts toward the exit point
 
 ### Mortar (Right Mouse)
-Fires arcing/direct projectile to crosshair position. Slower cooldown, limited ammo.
+Fires arcing projectile to crosshair position. Slower cooldown (0.6s), limited ammo.
 
 | Ammo Type | Effect | Source |
 |-----------|--------|--------|
@@ -44,18 +45,24 @@ Fires arcing/direct projectile to crosshair position. Slower cooldown, limited a
 | Acid | Area DoT at target position (10s, radius 3) | Pickup |
 | Wall | Places energy barrier blocking brick column | Pickup |
 
-- Mortar ammo is collected, not infinite
+- Mortar ammo is collected per type, not infinite
+- Type is selected with scroll wheel or number keys 1-4; firing with an
+  empty selection falls back to the first type with ammo
 - Mortar fires TO the crosshair position (targeted, not bouncing)
 - Explosion/effect happens at impact point
+- Mine is also a mortar type: lands as a stationary mine that explodes
+  on brick contact (and chains with bombs)
 
 ### AoE (Passive)
-Field-wide effects triggered by pickups.
+Field-wide effects triggered by shooting a field pickup (or when a brick
+touches it).
 
 | Type | Effect | Source |
 |------|--------|--------|
-| Freeze | Stops all brick advancement for N seconds | Pickup |
-| Lightning | Chain strikes on random bricks | Pickup |
-| Skull | Halves everything (at high levels) | Spawns at intervals |
+| Freeze | Stops all brick advancement for 5 seconds | Pickup |
+| Reverse | Bricks move upward for 3 seconds | Pickup |
+| Lightning | Chain strikes on random bricks | *Planned, not implemented* |
+| Skull | Halves everything (at high levels) | *Planned, not implemented* |
 
 ---
 
@@ -68,7 +75,7 @@ Reuse all shapes from Bricks:
 ### Properties
 - HP scales with game time / wave number
 - Shields (bottom protection)
-- Merging (tall bricks from overlapping spawns)
+- Merging (tall bricks from overlapping spawns) — *planned, not implemented*
 - Rainbow color gradient by HP
 
 ### Advancement
@@ -144,9 +151,9 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 | Left click | Fire gun |
 | Left hold | Rapid fire gun |
 | Right click | Fire mortar at crosshair |
-| Scroll / 1-3 | Cycle mortar ammo type |
+| Scroll / 1-4 | Select mortar ammo type |
 | Space | Pause |
-| Escape | Menu |
+| Escape | Menu (saves highscore) |
 
 ---
 
@@ -218,10 +225,19 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-- Should gun projectiles return (bounce off bottom) or exit?
-- Mortar arc animation or instant impact?
-- Max projectiles on screen at once?
-- Ammo regeneration or pickup-only?
-- Pause behavior — freeze everything or menu overlay?
+- Gun projectiles exit at the bottom and their ammo returns to the pool
+  after a 1s reload delay — max projectiles on screen equals the ammo pool.
+- Mortar shells fly a parabolic arc (0.2-0.6s depending on distance).
+- Ammo comes from pickups plus returned shots; no passive regeneration.
+- Pause freezes everything (timers, projectiles, advancement).
+
+## Code Layout
+
+| Module | Contents |
+|--------|----------|
+| `game.py` | Constants, `Brick`/`Projectile`/`Game`, all logic — no display |
+| `render.py` | Colors and all drawing functions |
+| `main.py` | Event loop and input handling |
+| `tests/test_game.py` | Logic tests (run with `py -m pytest` or directly) |
