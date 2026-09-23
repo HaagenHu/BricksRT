@@ -23,6 +23,16 @@
 - **Mortar reticle**: in-flight rounds mark their footprint at the
   target (blast/zone radius, dashed line for walls) with a ring closing
   in as the shell lands, and leave a fading arc trail
+- **Zone textures**: acid pools bubble (rise, swell, pop) and fade out;
+  tar is a glossy pool with a slowly wobbling edge; walls are energy
+  barriers — glowing core in a honeycomb strip that flickers faster as
+  the load nears breaking (dim while arming); freeze washes the field
+  icy blue and frozen bricks twinkle with frost glints
+- **Gun turret**: beveled dome with a tapered barrel that recoils on
+  every trigger, muzzle flash at the tip; tip band and dome core show
+  the next loaded special bullet's color
+- **Crosshair**: pip in the selected mortar round's color plus a ring
+  that fills while the mortar reloads
 - Perf: acid/tar discs are cached, freeze/skull rings draw directly
   instead of allocating screen-sized alpha surfaces every frame
 

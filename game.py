@@ -95,6 +95,8 @@ SHAKE_BOMB = 0.3
 SHAKE_WALL_BREAK = 0.45
 SHAKE_SKULL = 0.7
 SHAKE_DECAY = 1.8          # trauma drained per second
+GUN_KICK_TIME = 0.1        # barrel recoil + muzzle flash per trigger
+                           # (under GUN_COOLDOWN, so held fire pulses)
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -403,6 +405,7 @@ class Game:
         self.sparks: list[dict] = []
         self.smoke: list[dict] = []
         self.shake = 0.0  # screen-shake trauma, 0..1
+        self.gun_kick = 0.0  # recoil remaining (visual only)
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -699,6 +702,7 @@ class Game:
             d["timer"] -= dt
         self._update_particles(dt)
         self.shake = max(0.0, self.shake - SHAKE_DECAY * dt)
+        self.gun_kick = max(0.0, self.gun_kick - dt)
         for b in self.bricks:
             if b.spawn_t > 0:
                 b.spawn_t = max(0.0, b.spawn_t - dt)
@@ -1248,7 +1252,8 @@ class Game:
         self.volley_lock = self.volley_size()
         shots = min(self.volley_lock, self.gun_ammo)
         self.gun_cooldown = GUN_COOLDOWN
-        launch_x = self.gun_x + math.cos(self.aim_angle) * GUN_BARREL_LEN
+        self.gun_kick = GUN_KICK_TIME
+        launch_x =self.gun_x + math.cos(self.aim_angle) * GUN_BARREL_LEN
         launch_x = max(PROJECTILE_RADIUS,
                        min(WIDTH - PROJECTILE_RADIUS, launch_x))
         launch_y = (GRID_BOTTOM - PROJECTILE_RADIUS

@@ -421,6 +421,19 @@ def test_explosion_fx_and_shake():
     assert not gm.sparks and not gm.smoke and gm.shake == 0.0
 
 
+def test_gun_kick_on_fire():
+    gm = _fresh_game(wave=1)
+    gm.gun_cooldown = 0
+    assert gm.gun_kick == 0.0
+    assert gm.fire_gun()
+    assert gm.gun_kick == g.GUN_KICK_TIME
+    # Recoil settles before the next shot is allowed, so held fire pulses
+    assert g.GUN_KICK_TIME < g.GUN_COOLDOWN
+    for _ in range(int(g.GUN_KICK_TIME * 60) + 1):
+        gm.update(1 / 60)
+    assert gm.gun_kick == 0.0
+
+
 def test_tar_slows_bricks_in_zone():
     gm = _fresh_game(wave=6)
     gm.bricks = [

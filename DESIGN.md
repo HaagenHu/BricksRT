@@ -244,6 +244,14 @@ Juice over art assets — ranked by impact per effort:
    shockwave ring, spark streaks and smoke puffs
 9. Mortar landing reticle — **implemented**: the round's footprint at
    the target (dashed line for walls) plus a ring closing in on landing
+10. Zone textures — **implemented**: acid bubbles, glossy wobbling tar,
+    honeycomb energy walls (flicker rises with load), freeze wash +
+    frost glints
+11. Gun turret + crosshair — **implemented**: recoiling barrel, muzzle
+    flash, loaded-ammo tint; crosshair keeps its azure but gains a
+    mortar-type pip and reload ring
+12. Still open: background (nebula, floor grid), arcade font + HUD
+    panels, menu (glowing title, demo bricks)
 6. Spawn/death animation — **implemented**: rows slide down from
    behind the HUD; killed bricks shrink out over ~0.12s
 7. Ambient depth — **implemented**: three parallax star layers drift

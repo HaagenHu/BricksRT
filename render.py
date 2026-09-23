@@ -12,7 +12,7 @@ from game import (
     BOMB_RADIUS_CELLS,
     ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
-    HIT_FLASH_TIME,
+    HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN,
     Brick, Game, cell_rect,
 )
 
@@ -38,6 +38,7 @@ LIGHTNING_COLOR = (255, 240, 120)
 SKULL_COLOR = (200, 100, 255)
 GAMEOVER_OVERLAY = (0, 0, 0, 180)
 HUD_BG = (30, 30, 45)
+TURRET_METAL = (92, 96, 128)
 
 SHAKE_PX = 10  # max field offset at full shake trauma
 
@@ -212,6 +213,18 @@ def _alpha_disc(color: tuple[int, int, int], radius: int,
                            (radius, radius), radius)
         _disc_cache[key] = surf
     return surf
+
+
+_freeze_tint: pygame.Surface | None = None
+
+
+def _freeze_overlay() -> pygame.Surface:
+    """Field-sized icy wash, alpha set per frame to fade it out."""
+    global _freeze_tint
+    if _freeze_tint is None:
+        _freeze_tint = pygame.Surface((WIDTH, GRID_BOTTOM - GRID_TOP))
+        _freeze_tint.fill(FREEZE_COLOR)
+    return _freeze_tint
 
 
 def _smoke_sprite(radius: int) -> pygame.Surface:
@@ -465,6 +478,22 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
             glow_surf.fill((*SHIELD_COLOR, 60))
             screen.blit(glow_surf, (rect.left, rect.bottom - 3))
 
+    # Frost glint: while frozen, each brick twinkles now and then at a
+    # fixed spot (seeded by its cell; frozen bricks don't move rows)
+    if frozen:
+        seed = brick.col * 7 + brick.row * 13
+        twinkle = max(0.0, math.sin(time * 3 + seed)) ** 6
+        if twinkle > 0.05:
+            gx = rect.left + 8 + (seed * 37) % max(1, rect.width - 16)
+            gy = rect.top + 8 + (seed * 53) % max(1, rect.height - 16)
+            draw_glow(screen, TEXT_COLOR, gx, gy, 8, 0.8 * twinkle)
+            arm = int(5 * twinkle)
+            if arm:
+                pygame.draw.line(screen, TEXT_COLOR, (gx - arm, gy),
+                                 (gx + arm, gy), 1)
+                pygame.draw.line(screen, TEXT_COLOR, (gx, gy - arm),
+                                 (gx, gy + arm), 1)
+
     # HP text
     txt = font.render(str(brick.hp), True, TEXT_COLOR)
     screen.blit(txt, txt.get_rect(center=rect.center))
@@ -541,6 +570,12 @@ def draw_game(screen: pygame.Surface, game: Game,
                    game.freeze_timer > 0, brick.acid_t > 0,
                    game.reverse_timer > 0, brick.stun > 0)
 
+    # Freeze: icy wash over the field, fading over the last half second
+    if game.freeze_timer > 0:
+        tint = _freeze_overlay()
+        tint.set_alpha(int(30 * min(1.0, game.freeze_timer / 0.5)))
+        screen.blit(tint, (0, GRID_TOP))
+
     # Dying bricks (shrink out)
     for d in game.dying_bricks:
         draw_dying_brick(screen, d)
@@ -593,25 +628,64 @@ def draw_game(screen: pygame.Surface, game: Game,
         pygame.draw.line(screen, (200, 40, 40),
                          (mx - 4, my + 4), (mx + 4, my - 4), 2)
 
-    # Placed acid zones (stationary, green pulsing circle)
+    # Placed acid zones: pulsing green pool with bubbles that rise,
+    # swell and pop; fades out over its last half second
+    bubble_color = (170, 255, 90)
     for acid in game.placed_acids:
         ax, ay = int(acid["x"]), int(acid["y"])
         acid_r = int(ACID_RADIUS_CELLS * CELL_SIZE)
-        pulse = 0.5 + 0.5 * math.sin(acid["timer"] * 3)
-        alpha = int(40 + 30 * pulse)
+        t = acid["timer"]  # counts down
+        fade = min(1.0, t / 0.5)
+        pulse = 0.5 + 0.5 * math.sin(t * 3)
+        alpha = int((40 + 30 * pulse) * fade)
         screen.blit(_alpha_disc((120, 255, 0), acid_r, alpha),
                     (ax - acid_r, ay - acid_r))
-        pygame.draw.circle(screen, MORTAR_ACID_COLOR, (ax, ay), acid_r, 1)
+        pygame.draw.circle(screen, _mix(BG_COLOR, MORTAR_ACID_COLOR, fade),
+                           (ax, ay), acid_r, 1)
+        # Bubbles: deterministic per zone (seeded by its position), spread
+        # by the golden angle, each on its own rise-swell-pop cycle
+        seed = ax * 31 + ay * 17
+        for i in range(10):
+            a = seed * 0.37 + i * 2.39996
+            rr = acid_r * 0.85 * math.sqrt((i + 0.5) / 10)
+            phase = (-t * (0.6 + 0.07 * (i % 5)) + i * 0.137) % 1.0
+            bx = ax + math.cos(a) * rr
+            by = ay + math.sin(a) * rr - phase * 8
+            if phase < 0.85:
+                br = 2.5 + 3 * phase / 0.85
+                bcol = _mix(BG_COLOR, bubble_color, 0.8 * fade)
+            else:  # pop: quick expanding, fading ring
+                pop = (phase - 0.85) / 0.15
+                br = 5 + 4 * pop
+                bcol = _mix(BG_COLOR, bubble_color, 0.8 * fade * (1 - pop))
+            pygame.draw.circle(screen, bcol, (int(bx), int(by)), int(br), 1)
 
-    # Placed tar zones (stationary, dark sticky circle)
+    # Placed tar zones: dark pool with a slowly wobbling edge and a
+    # glossy highlight; fades out over its last moments
     for tar in game.placed_tars:
         tx, ty = int(tar["x"]), int(tar["y"])
         tar_r = int(TAR_RADIUS_CELLS * CELL_SIZE)
-        screen.blit(_alpha_disc((60, 50, 35), tar_r, 90),
+        t = tar["timer"]
+        fade = min(1.0, t / 0.6)
+        screen.blit(_alpha_disc((60, 50, 35), tar_r, int(130 * fade)),
                     (tx - tar_r, ty - tar_r))
-        pygame.draw.circle(screen, TAR_COLOR, (tx, ty), tar_r, 1)
+        edge = []
+        for k in range(36):
+            a = k * math.tau / 36
+            wob = (1 + 0.018 * math.sin(3 * a + t * 1.7)
+                   + 0.010 * math.sin(5 * a - t * 1.1))
+            edge.append((tx + math.cos(a) * tar_r * wob,
+                         ty + math.sin(a) * tar_r * wob))
+        pygame.draw.polygon(screen, _mix(BG_COLOR, TAR_COLOR, fade), edge, 2)
+        gloss = pygame.Rect(0, 0, int(tar_r * 1.3), int(tar_r * 1.3))
+        gloss.center = (int(tx - tar_r * 0.12), int(ty - tar_r * 0.12))
+        pygame.draw.arc(screen, _mix(BG_COLOR, (215, 195, 160), 0.6 * fade),
+                        gloss, math.pi * 0.55, math.pi * 0.95, 3)
 
-    # Placed walls (horizontal barrier line)
+    # Placed walls: energy barrier — glowing core line inside a honeycomb
+    # strip that flickers faster as the load nears breaking; dimmer
+    # while still arming (grace period)
+    hex_r = 6
     for wall in game.placed_walls:
         wy = int(wall["y"])
         weight = game.wall_weight
@@ -619,7 +693,21 @@ def draw_game(screen: pygame.Surface, game: Game,
         # Color shifts from orange to red as weight increases
         r_val = min(255, int(160 + 95 * ratio))
         g_val = max(0, int(160 * (1 - ratio)))
-        pygame.draw.line(screen, (r_val, g_val, 0), (0, wy), (WIDTH, wy), 3)
+        wcolor = (r_val, g_val, 0)
+        power = 0.5 if wall.get("grace", 0) > 0 else 1.0
+        for gx in range(12, WIDTH, 24):
+            draw_glow(screen, wcolor, gx, wy, 16, 0.45 * power)
+        t = game.game_time
+        for i in range(int(WIDTH / (hex_r * 1.5)) + 2):
+            cx = i * hex_r * 1.5
+            cy = wy + (hex_r * 0.43 if i % 2 else -hex_r * 0.43)
+            flick = 0.55 + 0.45 * math.sin(t * (6 + 20 * ratio) + i * 1.7)
+            hcol = _mix(BG_COLOR, wcolor, (0.3 + 0.5 * flick) * power)
+            pygame.draw.polygon(screen, hcol, [
+                (cx + hex_r * math.cos(k * math.pi / 3),
+                 cy + hex_r * math.sin(k * math.pi / 3)) for k in range(6)], 1)
+        pygame.draw.line(screen, _mix(wcolor, TEXT_COLOR, 0.35 * power),
+                         (0, wy), (WIDTH, wy), 2)
         # Weight indicator
         ttl = wall.get("ttl", 0)
         wt_txt = small_font.render(f"{weight}/{wall['max_weight']}  {ttl:.0f}s",
@@ -786,21 +874,67 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     screen.set_clip(None)
 
-    # --- Gun position + aim line ---
+    # --- Gun turret: dome on the HUD edge (the bottom bar covers its
+    # lower half), tapered barrel along the aim that recoils on each
+    # trigger, muzzle flash at the tip. The tip band and dome core
+    # show the next loaded special bullet's color. ---
     gx = int(game.gun_x)
     gy = GRID_BOTTOM
-    draw_glow(screen, AMMO_COLOR, gx, gy, 24, 0.5)
-    pygame.draw.circle(screen, AMMO_COLOR, (gx, gy), 8)
+    load_color = (AMMO_STYLE[game.gun_queue[0]][0] if game.gun_queue
+                  else AMMO_COLOR)
+    kick = game.gun_kick / GUN_KICK_TIME
+    draw_glow(screen, load_color, gx, gy, 28, 0.45)
     if game.phase in ("playing", "paused"):
-        ax = gx + math.cos(game.aim_angle) * GUN_BARREL_LEN
-        ay = gy + math.sin(game.aim_angle) * GUN_BARREL_LEN
-        pygame.draw.line(screen, AMMO_COLOR, (gx, gy), (int(ax), int(ay)), 2)
+        ca, sa = math.cos(game.aim_angle), math.sin(game.aim_angle)
+        nx, ny = -sa, ca  # barrel normal
+        length = GUN_BARREL_LEN - 6 * kick  # recoil pulls it in
+
+        def along(d: float, w: float) -> tuple[float, float]:
+            return gx + ca * d + nx * w, gy + sa * d + ny * w
+
+        barrel = [along(0, 5), along(length, 3),
+                  along(length, -3), along(0, -5)]
+        pygame.draw.polygon(screen, TURRET_METAL, barrel)
+        pygame.draw.polygon(screen, CROSSHAIR_OUTLINE, barrel, 1)
+        pygame.draw.polygon(screen, load_color, [
+            along(length - 6, 3.4), along(length, 3),
+            along(length, -3), along(length - 6, -3.4)])
+        if kick > 0.4:  # muzzle flash at the (unrecoiled) launch point
+            tip_x, tip_y = along(GUN_BARREL_LEN, 0)
+            # Kept soft: fresh shots add their own glow right here
+            draw_glow(screen, (255, 235, 180), tip_x, tip_y, 16, 0.4 * kick)
+            for spread in (-0.5, 0, 0.5):
+                a = game.aim_angle + spread
+                ray = 9 * kick if spread else 13 * kick
+                pygame.draw.line(screen, (255, 245, 210),
+                                 (int(tip_x), int(tip_y)),
+                                 (int(tip_x + math.cos(a) * ray),
+                                  int(tip_y + math.sin(a) * ray)), 2)
+    pygame.draw.circle(screen, TURRET_METAL, (gx, gy), 14)
+    _bevel_circle(screen, (gx, gy), 14, TURRET_METAL)
+    pygame.draw.circle(screen, load_color, (gx, gy), 5)
 
     # --- Crosshair (dark outline under a bright stroke for contrast) ---
     if game.phase == "playing":
         mx, my = game.crosshair
         size = 12
         draw_glow(screen, CROSSHAIR_COLOR, mx, my, 24, 0.35)
+        # Selected mortar round: a pip in its color at the lower right,
+        # and a ring filling clockwise from the top while it reloads
+        sel = AMMO_TYPES[game.ammo_sel]
+        if game.ammo_inv[sel] > 0:
+            scol = AMMO_STYLE[sel][0]
+            pygame.draw.circle(screen, CROSSHAIR_OUTLINE,
+                               (mx + size + 5, my + size + 5), 5)
+            pygame.draw.circle(screen, scol,
+                               (mx + size + 5, my + size + 5), 4)
+            ready = 1 - max(0.0, game.mortar_cooldown) / MORTAR_COOLDOWN
+            if ready < 1:
+                box = pygame.Rect(0, 0, 2 * size + 10, 2 * size + 10)
+                box.center = (mx, my)
+                pygame.draw.arc(screen, scol, box,
+                                math.pi / 2 - math.tau * ready, math.pi / 2,
+                                2)
         pygame.draw.line(screen, CROSSHAIR_OUTLINE,
                          (mx - size, my), (mx + size, my), 5)
         pygame.draw.line(screen, CROSSHAIR_OUTLINE,
