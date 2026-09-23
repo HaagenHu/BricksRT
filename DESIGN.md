@@ -250,8 +250,10 @@ Juice over art assets — ranked by impact per effort:
 11. Gun turret + crosshair — **implemented**: recoiling barrel, muzzle
     flash, loaded-ammo tint; crosshair keeps its azure but gains a
     mortar-type pip and reload ring
-12. Still open: background (nebula, floor grid), arcade font + HUD
-    panels, menu (glowing title, demo bricks)
+12. Backdrop, HUD, typeface, menu — **implemented**: nebula + scrolling
+    dot grid; gradient HUD panels, labeled values, badge timers, inset
+    ammo slots; Bahnschrift (system font, no bundled asset); glowing
+    hue-cycling title over shattering demo bricks, hover-lit buttons
 6. Spawn/death animation — **implemented**: rows slide down from
    behind the HUD; killed bricks shrink out over ~0.12s
 7. Ambient depth — **implemented**: three parallax star layers drift

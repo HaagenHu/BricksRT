@@ -3,7 +3,7 @@
 import pygame
 
 from game import FPS, HEIGHT, WIDTH, Game
-from render import draw_game, draw_help, draw_menu
+from render import UI_FONT, draw_game, draw_help, draw_menu
 
 AMMO_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
              pygame.K_5: 4, pygame.K_6: 5}
@@ -15,8 +15,9 @@ def main():
     pygame.display.set_caption("BricksRT")
     clock = pygame.time.Clock()
 
-    font = pygame.font.SysFont("Arial", 22, bold=True)
-    small_font = pygame.font.SysFont("Arial", 16, bold=True)
+    # Bahnschrift (DIN-style, ships with Windows 10+) with Arial fallback
+    font = pygame.font.SysFont(UI_FONT, 22, bold=True)
+    small_font = pygame.font.SysFont(UI_FONT, 16, bold=True)
 
     game = Game()
     play_rect: pygame.Rect | None = None

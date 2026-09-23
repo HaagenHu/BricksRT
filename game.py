@@ -309,6 +309,44 @@ def _apply_gravity(proj: Projectile, dt: float):
     proj.vel.y = math.sin(new_angle) * speed
 
 
+def make_shards(cx: float, cy: float, w: float, h: float,
+                hp: int) -> list[dict]:
+    """Burst of spinning triangles flying out from a killed brick
+    (visual only; also used by the menu's demo bricks)."""
+    rng = _FX_RNG
+    shards = []
+    for _ in range(rng.randint(*SHARD_COUNT)):
+        x = cx + rng.uniform(-w, w) * 0.35
+        y = cy + rng.uniform(-h, h) * 0.35
+        # Outward from the center, slight upward kick
+        ang = math.atan2(y - cy, x - cx) + rng.uniform(-0.6, 0.6)
+        speed = rng.uniform(*SHARD_SPEED)
+        life = rng.uniform(*SHARD_LIFE)
+        shards.append({
+            "x": x, "y": y,
+            "vx": math.cos(ang) * speed,
+            "vy": math.sin(ang) * speed - 80,
+            "rot": rng.uniform(0, math.tau),
+            "spin": rng.uniform(-12, 12),
+            "size": rng.uniform(4, 9), "hp": hp,
+            "life": life, "timer": life,
+        })
+    return shards
+
+
+def step_shards(shards: list[dict], dt: float) -> list[dict]:
+    """Advance shard physics; returns the ones still alive."""
+    drag = max(0.0, 1 - 1.8 * dt)
+    for s in shards:
+        s["timer"] -= dt
+        s["vx"] *= drag
+        s["vy"] = s["vy"] * drag + SHARD_GRAVITY * dt
+        s["x"] += s["vx"] * dt
+        s["y"] += s["vy"] * dt
+        s["rot"] += s["spin"] * dt
+    return [s for s in shards if s["timer"] > 0]
+
+
 def _jagged_path(points: list[tuple[float, float]],
                  steps: int = 5, spread: float = 8.0) -> list[tuple[float, float]]:
     """Subdivide a polyline with random perpendicular offsets (lightning look)."""
@@ -768,28 +806,8 @@ class Game:
             "cx": rect.centerx, "cy": cy, "hp": hp,
             "timer": DEATH_ANIM_TIME,
         })
-        self._spawn_shards(rect.centerx, cy, rect.width, rect.height, hp)
-
-    def _spawn_shards(self, cx: float, cy: float, w: float, h: float,
-                      hp: int):
-        """Burst of spinning triangles flying out from a killed brick."""
-        rng = _FX_RNG
-        for _ in range(rng.randint(*SHARD_COUNT)):
-            x = cx + rng.uniform(-w, w) * 0.35
-            y = cy + rng.uniform(-h, h) * 0.35
-            # Outward from the center, slight upward kick
-            ang = math.atan2(y - cy, x - cx) + rng.uniform(-0.6, 0.6)
-            speed = rng.uniform(*SHARD_SPEED)
-            life = rng.uniform(*SHARD_LIFE)
-            self.shards.append({
-                "x": x, "y": y,
-                "vx": math.cos(ang) * speed,
-                "vy": math.sin(ang) * speed - 80,
-                "rot": rng.uniform(0, math.tau),
-                "spin": rng.uniform(-12, 12),
-                "size": rng.uniform(4, 9), "hp": hp,
-                "life": life, "timer": life,
-            })
+        self.shards.extend(make_shards(rect.centerx, cy, rect.width,
+                                       rect.height, hp))
         if len(self.shards) > SHARD_MAX:
             del self.shards[:len(self.shards) - SHARD_MAX]
 
@@ -824,15 +842,7 @@ class Game:
         self.shake = min(1.0, self.shake + amount)
 
     def _update_particles(self, dt: float):
-        drag = max(0.0, 1 - 1.8 * dt)
-        for s in self.shards:
-            s["timer"] -= dt
-            s["vx"] *= drag
-            s["vy"] = s["vy"] * drag + SHARD_GRAVITY * dt
-            s["x"] += s["vx"] * dt
-            s["y"] += s["vy"] * dt
-            s["rot"] += s["spin"] * dt
-        self.shards = [s for s in self.shards if s["timer"] > 0]
+        self.shards = step_shards(self.shards, dt)
         spark_drag = max(0.0, 1 - 4.0 * dt)
         for s in self.sparks:
             s["timer"] -= dt

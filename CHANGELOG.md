@@ -33,6 +33,19 @@
   the next loaded special bullet's color
 - **Crosshair**: pip in the selected mortar round's color plus a ring
   that fills while the mortar reloads
+- **Backdrop**: faint nebula clouds behind the starfield (built once,
+  blurred), plus a dot grid at the cell corners that scrolls with the
+  advance
+- **HUD**: gradient panels with an azure edge line; muted WAVE / BEST
+  labels beside bright values; freeze/reverse timers as badges; ammo
+  slots are inset tiles with beveled balls, the selected one rimmed and
+  glowing in its type color
+- **Typeface**: Bahnschrift (DIN-style, ships with Windows 10+), Arial
+  fallback; dense text (help rows, HUD status line) uses its regular
+  weight so it fits
+- **Menu**: hue-cycling glowing title, dimmed demo bricks drifting down
+  and shattering behind it, buttons that light up on hover; PAUSED /
+  GAME OVER / NEW BEST! and the help title glow too
 - Perf: acid/tar discs are cached, freeze/skull rings draw directly
   instead of allocating screen-sized alpha surfaces every frame
 

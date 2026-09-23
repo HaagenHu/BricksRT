@@ -12,9 +12,13 @@ from game import (
     BOMB_RADIUS_CELLS,
     ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
-    HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN,
-    Brick, Game, cell_rect,
+    HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN, COLS, MAX_ROWS,
+    Brick, Game, cell_rect, make_shards, step_shards,
 )
+
+# UI typeface: first installed name wins (Bahnschrift ships with
+# Windows 10+; Arial is the fallback elsewhere)
+UI_FONT = "bahnschrift,arial"
 
 # Colors
 BG_COLOR = (20, 20, 30)
@@ -38,6 +42,10 @@ LIGHTNING_COLOR = (255, 240, 120)
 SKULL_COLOR = (200, 100, 255)
 GAMEOVER_OVERLAY = (0, 0, 0, 180)
 HUD_BG = (30, 30, 45)
+HUD_TOP = (38, 38, 58)     # panel gradient, outer edge
+HUD_LABEL = (130, 130, 170)
+SLOT_BG = (19, 19, 30)
+GRID_DOT = (46, 46, 70)
 TURRET_METAL = (92, 96, 128)
 
 SHAKE_PX = 10  # max field offset at full shake trauma
@@ -213,6 +221,136 @@ def _alpha_disc(color: tuple[int, int, int], radius: int,
                            (radius, radius), radius)
         _disc_cache[key] = surf
     return surf
+
+
+_nebula_bg: pygame.Surface | None = None
+
+
+def _nebula() -> pygame.Surface:
+    """Full-screen backdrop: faint purple/blue/teal clouds on the bg
+    color. Painted at quarter size, blurred, then smooth-scaled up —
+    built once from a fixed seed."""
+    global _nebula_bg
+    if _nebula_bg is None:
+        rng = random.Random(5)
+        lw, lh = WIDTH // 4, HEIGHT // 4
+        clouds = pygame.Surface((lw, lh))
+        palette = ((70, 30, 110), (25, 50, 120), (15, 85, 105),
+                   (95, 30, 80))
+        for _ in range(9):
+            k = rng.uniform(0.25, 0.5)
+            pygame.draw.circle(clouds, [int(c * k) for c in rng.choice(palette)],
+                               (rng.randrange(lw), rng.randrange(lh)),
+                               rng.randint(12, 34))
+        clouds = pygame.transform.gaussian_blur(clouds, 14)
+        base = pygame.Surface((lw, lh))
+        base.fill(BG_COLOR)
+        base.blit(clouds, (0, 0), special_flags=pygame.BLEND_ADD)
+        _nebula_bg = pygame.transform.smoothscale(base, (WIDTH, HEIGHT))
+    return _nebula_bg
+
+
+# HUD bars: vertical gradient panels with an azure accent line on the
+# edge facing the field
+_hud_cache: dict[tuple[int, bool], pygame.Surface] = {}
+
+
+def _hud_panel(height: int, edge_at_bottom: bool) -> pygame.Surface:
+    key = (height, edge_at_bottom)
+    surf = _hud_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface((WIDTH, height))
+        for y in range(height):
+            t = y / max(1, height - 1)
+            if not edge_at_bottom:
+                t = 1 - t
+            surf.fill(_mix(HUD_TOP, HUD_BG, t), (0, y, WIDTH, 1))
+        edge_y = height - 1 if edge_at_bottom else 0
+        surf.fill(_mix(BG_COLOR, CROSSHAIR_COLOR, 0.45), (0, edge_y, WIDTH, 1))
+        _hud_cache[key] = surf
+    return surf
+
+
+def _pill(screen: pygame.Surface, font: pygame.font.Font, text: str,
+          color: tuple[int, int, int], center: tuple[int, int]):
+    """Status badge: text in a dark rounded capsule with a colored rim."""
+    txt = font.render(text, True, color)
+    r = txt.get_rect(center=center).inflate(20, 8)
+    pygame.draw.rect(screen, SLOT_BG, r, border_radius=r.height // 2)
+    pygame.draw.rect(screen, _mix(BG_COLOR, color, 0.7), r, 1,
+                     border_radius=r.height // 2)
+    screen.blit(txt, txt.get_rect(center=center))
+
+
+# Glowing text (titles, overlays): the text blurred on black, blitted
+# additively under a crisp copy. Cached per font, text and color.
+_text_glow_cache: dict[tuple, pygame.Surface] = {}
+_ui_fonts: dict[tuple[int, bool], pygame.font.Font] = {}
+
+
+def _ui_font(size: int, bold: bool = True) -> pygame.font.Font:
+    """UI typeface at any size. Bahnschrift's bold is synthesized and
+    ~15% wider, so dense text (help rows, HUD status) uses regular."""
+    key = (size, bold)
+    if key not in _ui_fonts:
+        _ui_fonts[key] = pygame.font.SysFont(UI_FONT, size, bold=bold)
+    return _ui_fonts[key]
+
+
+def draw_glow_text(screen: pygame.Surface, font: pygame.font.Font,
+                   text: str, color: tuple[int, int, int],
+                   center: tuple[int, int],
+                   glow_color: tuple[int, int, int] | None = None):
+    glow_color = glow_color or color
+    key = (id(font), text, glow_color)
+    glow = _text_glow_cache.get(key)
+    if glow is None:
+        txt = font.render(text, True, glow_color)
+        pad = 18
+        glow = pygame.Surface((txt.get_width() + pad * 2,
+                               txt.get_height() + pad * 2))
+        glow.blit(txt, (pad, pad))
+        glow = pygame.transform.gaussian_blur(glow, 9)
+        _text_glow_cache[key] = glow
+    screen.blit(glow, glow.get_rect(center=center),
+                special_flags=pygame.BLEND_ADD)
+    txt = font.render(text, True, color)
+    screen.blit(txt, txt.get_rect(center=center))
+
+
+# Soft glow around a rounded rect (hovered buttons), cached per size
+_rect_glow_cache: dict[tuple, pygame.Surface] = {}
+
+
+def _rect_glow(size: tuple[int, int],
+               color: tuple[int, int, int]) -> pygame.Surface:
+    key = (size, color)
+    surf = _rect_glow_cache.get(key)
+    if surf is None:
+        pad = 14
+        surf = pygame.Surface((size[0] + pad * 2, size[1] + pad * 2))
+        pygame.draw.rect(surf, [int(c * 0.6) for c in color],
+                         (pad, pad, *size), border_radius=8)
+        surf = pygame.transform.gaussian_blur(surf, 8)
+        _rect_glow_cache[key] = surf
+    return surf
+
+
+def _button(screen: pygame.Surface, rect: pygame.Rect, label: str,
+            font: pygame.font.Font, fill: tuple[int, int, int],
+            edge: tuple[int, int, int]):
+    """Menu button; hovering lifts the fill and lights an azure rim."""
+    hover = rect.collidepoint(pygame.mouse.get_pos())
+    if hover:
+        glow = _rect_glow(rect.size, CROSSHAIR_COLOR)
+        screen.blit(glow, glow.get_rect(center=rect.center),
+                    special_flags=pygame.BLEND_ADD)
+        fill = _mix(fill, TEXT_COLOR, 0.12)
+        edge = CROSSHAIR_COLOR
+    pygame.draw.rect(screen, fill, rect, border_radius=8)
+    pygame.draw.rect(screen, edge, rect, 2, border_radius=8)
+    txt = font.render(label, True, TEXT_COLOR)
+    screen.blit(txt, txt.get_rect(center=rect.center))
 
 
 _freeze_tint: pygame.Surface | None = None
@@ -522,9 +660,23 @@ def draw_dying_brick(screen: pygame.Surface, d: dict):
         pygame.draw.rect(screen, color, rect, border_radius=3)
 
 
+def draw_shards(screen: pygame.Surface, shards: list[dict]):
+    """Kill shards: spinning triangles that shrink and cool toward the bg."""
+    for s in shards:
+        f = s["timer"] / s["life"]
+        color = brick_color(s["hp"])
+        size = s["size"] * (0.4 + 0.6 * f)
+        pts = [(s["x"] + size * math.cos(s["rot"] + k * math.tau / 3),
+                s["y"] + size * math.sin(s["rot"] + k * math.tau / 3))
+               for k in range(3)]
+        draw_glow(screen, color, s["x"], s["y"], 10, 0.4 * f)
+        pygame.draw.polygon(screen, _mix(BG_COLOR, color, 0.35 + 0.65 * f),
+                            pts)
+
+
 def draw_game(screen: pygame.Surface, game: Game,
               font: pygame.font.Font, small_font: pygame.font.Font):
-    screen.fill(BG_COLOR)
+    screen.blit(_nebula(), (0, 0))
     off = game.brick_offset
 
     # --- Clip region for game area ---
@@ -532,6 +684,13 @@ def draw_game(screen: pygame.Surface, game: Game,
     screen.set_clip(clip)
 
     draw_starfield(screen, game.game_time)
+
+    # Floor grid: faint dots at the inner cell corners, scrolling with
+    # the advance so the field's motion reads between row spawns
+    for row in range(-1, MAX_ROWS + 1):
+        y = int(GRID_TOP + row * CELL_SIZE + off)
+        for col in range(1, COLS):
+            screen.fill(GRID_DOT, (col * CELL_SIZE - 1, y - 1, 2, 2))
 
     # Red danger glow at the bottom — fades in as the lowest brick
     # enters the last three rows, full strength at the death line
@@ -580,17 +739,7 @@ def draw_game(screen: pygame.Surface, game: Game,
     for d in game.dying_bricks:
         draw_dying_brick(screen, d)
 
-    # Kill shards: spinning triangles that shrink and cool toward the bg
-    for s in game.shards:
-        f = s["timer"] / s["life"]
-        color = brick_color(s["hp"])
-        size = s["size"] * (0.4 + 0.6 * f)
-        pts = [(s["x"] + size * math.cos(s["rot"] + k * math.tau / 3),
-                s["y"] + size * math.sin(s["rot"] + k * math.tau / 3))
-               for k in range(3)]
-        draw_glow(screen, color, s["x"], s["y"], 10, 0.4 * f)
-        pygame.draw.polygon(screen, _mix(BG_COLOR, color, 0.35 + 0.65 * f),
-                            pts)
+    draw_shards(screen, game.shards)
 
     # Explosion smoke: soft gray puffs that swell, drift up and thin out
     for s in game.smoke:
@@ -947,25 +1096,29 @@ def draw_game(screen: pygame.Surface, game: Game,
         pygame.draw.circle(screen, CROSSHAIR_COLOR, (mx, my), size, 1)
 
     # --- HUD: Top bar ---
-    pygame.draw.rect(screen, HUD_BG, (0, 0, WIDTH, TOP_UI_HEIGHT))
-    wave_txt = font.render(f"Wave: {game.wave}", True, TEXT_COLOR)
-    screen.blit(wave_txt, (10, 14))
-    best_txt = font.render(f"Best: {game.highscore}", True, TEXT_COLOR)
-    screen.blit(best_txt, (WIDTH - best_txt.get_width() - 10, 14))
+    screen.blit(_hud_panel(TOP_UI_HEIGHT, True), (0, 0))
+    # Muted small-caps label beside a bright value, both centered
+    mid = TOP_UI_HEIGHT // 2
+    lbl = small_font.render("WAVE", True, HUD_LABEL)
+    num = font.render(str(game.wave), True, TEXT_COLOR)
+    screen.blit(lbl, lbl.get_rect(midleft=(12, mid + 1)))
+    screen.blit(num, num.get_rect(midleft=(12 + lbl.get_width() + 8, mid)))
+    num = font.render(str(game.highscore), True, TEXT_COLOR)
+    num_rect = num.get_rect(midright=(WIDTH - 12, mid))
+    lbl = small_font.render("BEST", True, HUD_LABEL)
+    screen.blit(lbl, lbl.get_rect(midright=(num_rect.left - 8, mid + 1)))
+    screen.blit(num, num_rect)
 
-    # Freeze/reverse timer on top bar (centered)
+    # Freeze/reverse timer on top bar (centered badge)
     if game.reverse_timer > 0:
-        rt_txt = small_font.render(f"REVERSE {game.reverse_timer:.1f}s",
-                                   True, REVERSE_COLOR)
-        screen.blit(rt_txt, rt_txt.get_rect(center=(WIDTH // 2, TOP_UI_HEIGHT // 2)))
+        _pill(screen, small_font, f"REVERSE {game.reverse_timer:.1f}s",
+              REVERSE_COLOR, (WIDTH // 2, mid))
     elif game.freeze_timer > 0:
-        ft_txt = small_font.render(f"FROZEN {game.freeze_timer:.1f}s",
-                                   True, FREEZE_COLOR)
-        screen.blit(ft_txt, ft_txt.get_rect(center=(WIDTH // 2, TOP_UI_HEIGHT // 2)))
+        _pill(screen, small_font, f"FROZEN {game.freeze_timer:.1f}s",
+              FREEZE_COLOR, (WIDTH // 2, mid))
 
     # --- HUD: Bottom bar ---
-    pygame.draw.rect(screen, HUD_BG,
-                     (0, GRID_BOTTOM, WIDTH, BOTTOM_AREA_HEIGHT))
+    screen.blit(_hud_panel(BOTTOM_AREA_HEIGHT, False), (0, GRID_BOTTOM))
 
     available = game.gun_ammo
     in_flight = len(game.projectiles)
@@ -1016,11 +1169,13 @@ def draw_game(screen: pygame.Surface, game: Game,
     if game.ammo_debt > 0:
         sub_parts.append(f"-{game.ammo_debt} skull")
     if sub_parts:
-        fly_txt = small_font.render("  ".join(sub_parts), True, (130, 130, 160))
+        fly_txt = _ui_font(15, bold=False).render("  ".join(sub_parts), True,
+                                                  (130, 130, 160))
         screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 6))
 
-    # Shared ammo — one slot per type (right side), ring marks
-    # selection, count sits below the type ball
+    # Shared ammo — one inset slot per type (right side): beveled type
+    # ball with its count below; the selected slot gets a rim in its
+    # type color and a glow (a neutral rim if it's empty)
     slot_w = 40
     slot_cy = GRID_BOTTOM + 20
     ammo_start_x = WIDTH - len(AMMO_TYPES) * slot_w + 14
@@ -1028,11 +1183,20 @@ def draw_game(screen: pygame.Surface, game: Game,
         mx = ammo_start_x + i * slot_w
         count = game.ammo_inv[mtype]
         color, label = AMMO_STYLE[mtype]
-        if count <= 0:
+        stocked = count > 0
+        slot = pygame.Rect(0, 0, slot_w - 6, BOTTOM_AREA_HEIGHT - 8)
+        slot.center = (mx, GRID_BOTTOM + BOTTOM_AREA_HEIGHT // 2)
+        pygame.draw.rect(screen, SLOT_BG, slot, border_radius=7)
+        if i == game.ammo_sel:
+            if stocked:
+                draw_glow(screen, color, mx, slot_cy, 22, 0.45)
+            pygame.draw.rect(screen, color if stocked else HUD_LABEL, slot,
+                             2, border_radius=7)
+        if not stocked:
             color = (60, 60, 75)
         pygame.draw.circle(screen, color, (mx, slot_cy), 11)
-        if i == game.ammo_sel:
-            pygame.draw.circle(screen, TEXT_COLOR, (mx, slot_cy), 14, 2)
+        if stocked:
+            _bevel_circle(screen, (mx, slot_cy), 11, color)
         t = small_font.render(label, True, BG_COLOR)
         screen.blit(t, t.get_rect(center=(mx, slot_cy)))
         cnt_color = TEXT_COLOR if count > 0 else (100, 100, 120)
@@ -1044,8 +1208,8 @@ def draw_game(screen: pygame.Surface, game: Game,
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 120))
         screen.blit(overlay, (0, 0))
-        txt = font.render("PAUSED", True, TEXT_COLOR)
-        screen.blit(txt, txt.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
+        draw_glow_text(screen, _ui_font(40), "PAUSED", TEXT_COLOR,
+                       (WIDTH // 2, HEIGHT // 2 - 8), CROSSHAIR_COLOR)
         hint = small_font.render("Space to resume  |  Esc for menu",
                                  True, (180, 180, 180))
         screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 30)))
@@ -1055,46 +1219,101 @@ def draw_game(screen: pygame.Surface, game: Game,
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill(GAMEOVER_OVERLAY)
         screen.blit(overlay, (0, 0))
-        go_txt = font.render("GAME OVER", True, TEXT_COLOR)
-        screen.blit(go_txt,
-                    go_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30)))
+        draw_glow_text(screen, _ui_font(44), "GAME OVER", TEXT_COLOR,
+                       (WIDTH // 2, HEIGHT // 2 - 34), REVERSE_COLOR)
         w_txt = font.render(f"Wave {game.wave}", True, TEXT_COLOR)
         screen.blit(w_txt,
                     w_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 10)))
         if game.new_best:
-            new_txt = font.render("NEW BEST!", True, AMMO_COLOR)
-            screen.blit(new_txt,
-                        new_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40)))
+            draw_glow_text(screen, font, "NEW BEST!", AMMO_COLOR,
+                           (WIDTH // 2, HEIGHT // 2 + 40))
         hint = small_font.render("Click to continue", True, (180, 180, 180))
         screen.blit(hint,
                     hint.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 70)))
+
+
+# Menu backdrop: dimmed demo bricks drift down in the grid columns and
+# shatter at a random height. Wall-clock driven (the menu has no game
+# time); own RNG so it never touches gameplay randomness.
+MENU_SHAPES = ("square", "round", "diamond", "hexagon", "triangle",
+               "trapezoid")
+MENU_MAX_BRICKS = 10
+_menu_rng = random.Random()
+_menu_fx: dict = {"last": None, "spawn": 0.0, "bricks": [], "shards": []}
+
+
+def _draw_menu_bricks(screen: pygame.Surface, now: float):
+    fx = _menu_fx
+    dt = 0.0 if fx["last"] is None else min(0.05, max(0.0, now - fx["last"]))
+    fx["last"] = now
+    rng = _menu_rng
+
+    fx["spawn"] -= dt
+    if fx["spawn"] <= 0 and len(fx["bricks"]) < MENU_MAX_BRICKS:
+        fx["spawn"] = rng.uniform(0.5, 1.1)
+        fx["bricks"].append({
+            "x": rng.randrange(COLS) * CELL_SIZE + CELL_SIZE / 2,
+            "y": -CELL_SIZE / 2, "v": rng.uniform(18, 40),
+            "shape": rng.choice(MENU_SHAPES),
+            "tri_dir": rng.choice(("up", "down")),
+            "hp": rng.randint(1, 100),
+            "pop_y": rng.uniform(0.3, 0.95) * HEIGHT,
+        })
+    alive = []
+    for b in fx["bricks"]:
+        b["y"] += b["v"] * dt
+        if b["y"] >= b["pop_y"]:
+            fx["shards"].extend(make_shards(b["x"], b["y"], BRICK_SIZE,
+                                            BRICK_SIZE, b["hp"]))
+        else:
+            alive.append(b)
+    fx["bricks"] = alive
+    fx["shards"] = step_shards(fx["shards"], dt)
+
+    for b in fx["bricks"]:
+        color = _mix(BG_COLOR, brick_color(b["hp"]), 0.5)
+        center = (int(b["x"]), int(b["y"]))
+        halo = _brick_halo(b["shape"], b["tri_dir"], color)
+        screen.blit(halo, halo.get_rect(center=center),
+                    special_flags=pygame.BLEND_ADD)
+        pts = shape_points(b["shape"], b["tri_dir"], *center, BRICK_SIZE / 2)
+        if b["shape"] == "round":
+            pygame.draw.circle(screen, color, center, BRICK_SIZE // 2)
+            _bevel_circle(screen, center, BRICK_SIZE // 2, color)
+        elif pts is not None:
+            pygame.draw.polygon(screen, color, pts)
+            _bevel_polygon(screen, pts, color)
+        else:
+            rect = pygame.Rect(0, 0, BRICK_SIZE, BRICK_SIZE)
+            rect.center = center
+            pygame.draw.rect(screen, color, rect, border_radius=4)
+            _bevel_rect(screen, rect, color)
+    draw_shards(screen, fx["shards"])
 
 
 def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
               small_font: pygame.font.Font,
               highscore: int) -> tuple[pygame.Rect, pygame.Rect]:
     """Returns (play button rect, help button rect)."""
-    screen.fill(BG_COLOR)
-    draw_starfield(screen, pygame.time.get_ticks() / 1000.0, 0, HEIGHT)
+    now = pygame.time.get_ticks() / 1000.0
+    screen.blit(_nebula(), (0, 0))
+    draw_starfield(screen, now, 0, HEIGHT)
+    _draw_menu_bricks(screen, now)
 
-    title = font.render("BRICKS RT", True, TEXT_COLOR)
-    screen.blit(title, title.get_rect(center=(WIDTH // 2, HEIGHT // 3 - 40)))
+    # Title: slow hue cycle in the glow, near-white letters on top
+    r, g, b = colorsys.hsv_to_rgb(int(now / 12 * 36) % 36 / 36, 0.7, 1.0)
+    hue = (int(r * 255), int(g * 255), int(b * 255))
+    draw_glow_text(screen, _ui_font(60), "BRICKS RT",
+                   _mix(TEXT_COLOR, hue, 0.2), (WIDTH // 2, HEIGHT // 3 - 44),
+                   hue)
     sub = small_font.render("Real-time brick breaker", True, (150, 150, 180))
-    screen.blit(sub, sub.get_rect(center=(WIDTH // 2, HEIGHT // 3)))
+    screen.blit(sub, sub.get_rect(center=(WIDTH // 2, HEIGHT // 3 + 4)))
 
-    # Play button
     play_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 - 20, 160, 50)
-    pygame.draw.rect(screen, (60, 60, 90), play_rect, border_radius=8)
-    pygame.draw.rect(screen, TEXT_COLOR, play_rect, 2, border_radius=8)
-    play_txt = font.render("PLAY", True, TEXT_COLOR)
-    screen.blit(play_txt, play_txt.get_rect(center=play_rect.center))
-
-    # Help button
+    _button(screen, play_rect, "PLAY", font, (60, 60, 90), TEXT_COLOR)
     help_rect = pygame.Rect(WIDTH // 2 - 60, HEIGHT // 2 + 44, 120, 36)
-    pygame.draw.rect(screen, (45, 45, 70), help_rect, border_radius=8)
-    pygame.draw.rect(screen, (150, 150, 180), help_rect, 2, border_radius=8)
-    help_txt = small_font.render("HELP", True, TEXT_COLOR)
-    screen.blit(help_txt, help_txt.get_rect(center=help_rect.center))
+    _button(screen, help_rect, "HELP", small_font, (45, 45, 70),
+            (150, 150, 180))
 
     if highscore > 0:
         hs_txt = small_font.render(f"Best: Wave {highscore}", True, (150, 150, 180))
@@ -1122,27 +1341,28 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
 def draw_help(screen: pygame.Surface, font: pygame.font.Font,
               small_font: pygame.font.Font):
     """Pickup legend: every field icon with its effect and unlock wave."""
-    screen.fill(BG_COLOR)
+    screen.blit(_nebula(), (0, 0))
     draw_starfield(screen, pygame.time.get_ticks() / 1000.0, 0, HEIGHT)
 
-    title = font.render("PICKUPS", True, TEXT_COLOR)
-    screen.blit(title, title.get_rect(center=(WIDTH // 2, 40)))
+    draw_glow_text(screen, _ui_font(34), "PICKUPS", TEXT_COLOR,
+                   (WIDTH // 2, 42), CROSSHAIR_COLOR)
 
     icon_x, text_x = 40, 68
     header_color = (150, 150, 180)
     text_color = (200, 200, 215)
+    text_font = _ui_font(16, bold=False)  # long lines: regular fits
     y = 84
 
     def header(label: str):
         nonlocal y
-        t = small_font.render(label, True, header_color)
+        t = text_font.render(label, True, header_color)
         screen.blit(t, (24, y))
         y += 28
 
     def row(icon_fn, desc: str):
         nonlocal y
         icon_fn(y)
-        t = small_font.render(desc, True, text_color)
+        t = text_font.render(desc, True, text_color)
         screen.blit(t, (text_x, y - 9))
         y += 28
 
