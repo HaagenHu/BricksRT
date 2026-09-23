@@ -3,6 +3,7 @@
 import pygame
 
 from game import FPS, HEIGHT, WIDTH, Game
+import sound
 from render import UI_FONT, draw_game, draw_help, draw_menu
 
 AMMO_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
@@ -10,6 +11,7 @@ AMMO_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
 
 
 def main():
+    sound.pre_init()  # mixer settings must precede pygame.init()
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("BricksRT")
@@ -19,6 +21,7 @@ def main():
     font = pygame.font.SysFont(UI_FONT, 22, bold=True)
     small_font = pygame.font.SysFont(UI_FONT, 16, bold=True)
 
+    sfx = sound.Sounds()  # synthesizes the cues once, at startup
     game = Game()
     play_rect: pygame.Rect | None = None
     help_rect: pygame.Rect | None = None
@@ -65,6 +68,8 @@ def main():
                         game.phase = "paused"
                     elif game.phase == "paused":
                         game.phase = "playing"
+                if event.key == pygame.K_m:
+                    sfx.toggle_mute()
                 if event.key in AMMO_KEYS and game.phase == "playing":
                     game.select_mortar(AMMO_KEYS[event.key])
                 if event.key == pygame.K_r and game.phase == "playing":
@@ -101,11 +106,13 @@ def main():
             if mouse_held:
                 game.fire_gun()
             game.update(dt)
+        # Cues from this frame's input (mortar fire) and update
+        sfx.play_events(game.drain_events())
 
         # Hide system cursor when crosshair is shown
         pygame.mouse.set_visible(game.phase != "playing")
 
-        draw_game(screen, game, font, small_font)
+        draw_game(screen, game, font, small_font, muted=sfx.muted)
         pygame.display.flip()
 
     pygame.quit()

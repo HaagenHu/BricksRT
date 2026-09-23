@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.1 — Sound effects (2026-09-24)
+
+- **Sound**: 15 procedural cues, synthesized at startup in plain
+  Python (no numpy, no audio files, ~0.1s): brick kill, blast, mortar
+  launch, mine armed, acid, tar, wall up / break, pickup, freeze,
+  reverse, lightning, skull, game over, new best
+- Follows the DESIGN.md tiers — sound the meaning, not every event:
+  rare cues always play; kills (max 1 per 70ms) and blasts (60ms) are
+  rate-limited, and a burst in one frame plays once, louder; gun fire
+  and bounces stay silent for now
+- **M** toggles sound (MUTED shows in the top bar); if no audio device
+  is available the game runs silently
+- The game logic stays audio-free: it queues cue names
+  (`Game.drain_events`) that `sound.py` plays each frame
+- README: Graphics section and a gameplay/menu screenshot
+
 ## v0.5.0 — Neon graphics (2026-09-24)
 
 - **Additive glow**: projectiles, mortar shells, explosions, lightning,

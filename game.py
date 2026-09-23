@@ -97,6 +97,7 @@ SHAKE_SKULL = 0.7
 SHAKE_DECAY = 1.8          # trauma drained per second
 GUN_KICK_TIME = 0.1        # barrel recoil + muzzle flash per trigger
                            # (under GUN_COOLDOWN, so held fire pulses)
+EVENT_MAX = 64             # queued frontend cues kept if nobody drains
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -444,6 +445,8 @@ class Game:
         self.smoke: list[dict] = []
         self.shake = 0.0  # screen-shake trauma, 0..1
         self.gun_kick = 0.0  # recoil remaining (visual only)
+        # Cue names for the frontend (sound), drained once per frame
+        self.events: list[str] = []
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -695,6 +698,7 @@ class Game:
                 # Overloaded: it breaks — sparks along the line + shake
                 dead_walls.append(w)
                 self._add_shake(SHAKE_WALL_BREAK)
+                self._emit("wall_break")
                 for i in range(6):
                     self._spawn_sparks((i + 0.5) * WIDTH / 6, w["y"], 4,
                                        (255, 160, 40))
@@ -808,6 +812,7 @@ class Game:
         })
         self.shards.extend(make_shards(rect.centerx, cy, rect.width,
                                        rect.height, hp))
+        self._emit("kill")
         if len(self.shards) > SHARD_MAX:
             del self.shards[:len(self.shards) - SHARD_MAX]
 
@@ -837,6 +842,17 @@ class Game:
             })
         if len(self.smoke) > PARTICLE_MAX:
             del self.smoke[:len(self.smoke) - PARTICLE_MAX]
+
+    def _emit(self, name: str):
+        """Queue a cue for the frontend. Capped, so a game driven without
+        a frontend (tests) never grows it without bound."""
+        self.events.append(name)
+        if len(self.events) > EVENT_MAX:
+            del self.events[:len(self.events) - EVENT_MAX]
+
+    def drain_events(self) -> list[str]:
+        out, self.events = self.events, []
+        return out
 
     def _add_shake(self, amount: float):
         self.shake = min(1.0, self.shake + amount)
@@ -928,6 +944,7 @@ class Game:
             if pixel_bottom >= GRID_BOTTOM:
                 self.phase = "gameover"
                 self.save_if_record()
+                self._emit("new_best" if self.new_best else "gameover")
                 return True
         return False
 
@@ -1398,6 +1415,7 @@ class Game:
         if target is not None:
             shell["target"] = target  # tracked while flying
         self.mortar_shells.append(shell)
+        self._emit("mortar_launch")
         return True
 
     def panic(self) -> bool:
@@ -1446,6 +1464,7 @@ class Game:
             if mtype == "homing":
                 shell["target"] = biggest  # rocket locks the big one
             self.mortar_shells.append(shell)
+        self._emit("mortar_launch")  # one cue for the whole barrage
         # Keep the HUD highlight on a stocked type
         self._sync_sel()
         return True
@@ -1458,20 +1477,24 @@ class Game:
             self._explode(mx, my)
         elif mtype == "mine":
             self.placed_mines.append({"x": mx, "y": my})
+            self._emit("mine_set")
         elif mtype == "acid":
             self.placed_acids.append({
                 "x": mx, "y": my,
                 "timer": ACID_DURATION, "tick": 0.0,
             })
+            self._emit("acid")
         elif mtype == "tar":
             self.placed_tars.append({
                 "x": mx, "y": my, "timer": TAR_DURATION,
             })
+            self._emit("tar")
         elif mtype == "wall":
             self.placed_walls.append({
                 "y": my, "max_weight": max(1, self.wave) * 15,
                 "grace": 2.0, "ttl": 12.0,
             })
+            self._emit("wall_up")
         elif mtype == "homing":
             self._explode(mx, my)  # rocket detonates on its target
 
@@ -1761,6 +1784,7 @@ class Game:
 
     def _collect_pickup(self, ptype: str):
         """Apply the effect of a collected field pickup."""
+        self._emit("pickup")
         if ptype == "ammo":
             self.gun_ammo += AMMO_PER_PICKUP
         else:  # everything else is one unit of shared ammo inventory
@@ -1817,6 +1841,7 @@ class Game:
         ]
 
     def _trigger_freeze(self, x: float, y: float):
+        self._emit("freeze")
         self.freeze_timer = FREEZE_DURATION
         self.freeze_wave = {
             "x": x, "y": y, "radius": 0,
@@ -1825,6 +1850,7 @@ class Game:
         }
 
     def _trigger_reverse(self, x: float, y: float):
+        self._emit("reverse")
         self.reverse_timer = REVERSE_DURATION
         self.reverse_wave = {
             "x": x, "y": y,
@@ -1836,6 +1862,7 @@ class Game:
         """Chain strikes: light damage + a stun on random bricks."""
         if not self.bricks:
             return
+        self._emit("lightning")
         targets = random.sample(self.bricks,
                                 min(LIGHTNING_STRIKES, len(self.bricks)))
         damage = max(1, self.wave // 5)
@@ -1885,6 +1912,7 @@ class Game:
         }
         self.ammo_flash = AMMO_FLASH_TIME
         self._add_shake(SHAKE_SKULL)
+        self._emit("skull")
 
     def _collide_placed_aoe(self, proj: Projectile, placed: list[dict],
                             trigger):
@@ -1958,6 +1986,7 @@ class Game:
             elif pu["type"] == "ammo" and d < blast_px:
                 collected.append(pu)
                 self.gun_ammo += AMMO_PER_PICKUP
+                self._emit("pickup")
         if collected:
             self.pickups = [p for p in self.pickups if p not in collected]
         for pu in chain:
@@ -1977,6 +2006,7 @@ class Game:
         self._spawn_sparks(ex, ey, SPARK_COUNT)
         self._spawn_smoke(ex, ey)
         self._add_shake(SHAKE_BOMB)
+        self._emit("explode")
 
     def _update_acids(self, dt: float):
         """Tick placed acid zones: damage bricks within radius each second."""

@@ -708,7 +708,8 @@ def draw_shards(screen: pygame.Surface, shards: list[dict]):
 
 
 def draw_game(screen: pygame.Surface, game: Game,
-              font: pygame.font.Font, small_font: pygame.font.Font):
+              font: pygame.font.Font, small_font: pygame.font.Font,
+              muted: bool = False):
     screen.blit(_nebula(), (0, 0))
     off = game.brick_offset
 
@@ -1142,8 +1143,12 @@ def draw_game(screen: pygame.Surface, game: Game,
     num = font.render(str(game.highscore), True, TEXT_COLOR)
     num_rect = num.get_rect(midright=(WIDTH - 12, mid))
     lbl = small_font.render("BEST", True, HUD_LABEL)
-    screen.blit(lbl, lbl.get_rect(midright=(num_rect.left - 8, mid + 1)))
+    lbl_rect = lbl.get_rect(midright=(num_rect.left - 8, mid + 1))
+    screen.blit(lbl, lbl_rect)
     screen.blit(num, num_rect)
+    if muted:  # M toggles; clear of the centered timer badge
+        m = _ui_font(13, bold=False).render("MUTED", True, HUD_LABEL)
+        screen.blit(m, m.get_rect(midright=(lbl_rect.left - 14, mid + 1)))
 
     # Freeze/reverse timer on top bar (centered badge)
     if game.reverse_timer > 0:
@@ -1365,6 +1370,7 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
         "Q — Panic mortars at lowest row",
         "W — Panic gun: load all types",
         "Space — Pause",
+        "M — Sound on / off",
         "Esc — Menu",
     ]
     for i, line in enumerate(controls):

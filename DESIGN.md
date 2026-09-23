@@ -200,7 +200,15 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 
 ---
 
-## Sound (suggestion, not implemented)
+## Sound
+
+**Status (v0.5.1):** the "Always" and "Rate-limited" tiers are
+implemented in `sound.py` (15 cues; blasts are rate-limited too). The
+"Mostly silent" tier is still silent — playtest before adding ticks.
+Deviations from the notes below: synthesis is plain Python (no numpy
+dependency) at 22050 Hz with a 512-sample buffer, and the game logic
+only queues cue names (`Game.drain_events`), keeping `game.py`
+audio-free.
 
 Per-event audio would be white noise at this event density (volleys up
 to 8 triggers/s x 4 shots, dozens of bouncing projectiles). Sound the

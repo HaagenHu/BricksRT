@@ -6,7 +6,10 @@ import sys
 import tempfile
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")  # no speakers needed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pygame  # noqa: E402
 
 import game as g
 from game import Brick, Game, Projectile
@@ -419,6 +422,62 @@ def test_explosion_fx_and_shake():
     for _ in range(int(g.SMOKE_LIFE[1] * 60) + 2):
         gm.update(1 / 60)
     assert not gm.sparks and not gm.smoke and gm.shake == 0.0
+
+
+def test_sound_cues_emitted():
+    gm = _fresh_game(wave=10)
+    gm.drain_events()
+    # Kill, blast, pickup and mortar launch each queue their cue
+    b = Brick(col=3, row=4, hp=1)
+    gm.bricks = [b]
+    gm._kill_brick(b)
+    gm._explode(50, 300)
+    gm._collect_pickup("ammo")
+    gm.ammo_inv["bomb"] = 1
+    gm.select_mortar(g.AMMO_TYPES.index("bomb"))
+    gm.mortar_cooldown = 0
+    assert gm.fire_mortar()
+    ev = gm.drain_events()
+    for cue in ("kill", "explode", "pickup", "mortar_launch"):
+        assert cue in ev, cue
+    assert gm.drain_events() == []  # draining empties the queue
+    # Undrained (no frontend), the queue stays bounded
+    for _ in range(g.EVENT_MAX * 3):
+        gm._emit("kill")
+    assert len(gm.events) == g.EVENT_MAX
+
+
+def test_sound_player():
+    import sound
+    try:
+        pygame.mixer.init(sound.MIX_RATE, -16, 1, sound.MIX_BUFFER)
+    except pygame.error:
+        print("    (no audio driver - skipped)")
+        return
+    try:
+        sfx = sound.Sounds()
+        assert sfx.enabled
+        # Every cue the game emits has a sound
+        cues = ("kill", "explode", "mortar_launch", "mine_set", "acid",
+                "tar", "wall_up", "wall_break", "pickup", "freeze",
+                "reverse", "lightning", "skull", "gameover", "new_best")
+        for cue in cues:
+            assert sfx.cues[cue], cue
+            assert all(s.get_length() > 0 for s in sfx.cues[cue])
+        # Kills are rate-limited: a second burst 30ms later is dropped
+        sfx.play_events(["kill"] * 5, now=10.0)
+        assert sfx._last["kill"] == 10.0
+        sfx.play_events(["kill"], now=10.03)
+        assert sfx._last["kill"] == 10.0
+        sfx.play_events(["kill"], now=10.1)
+        assert sfx._last["kill"] == 10.1
+        # Muted: nothing plays, nothing is recorded
+        sfx.toggle_mute()
+        sfx.play_events(["pickup"], now=11.0)
+        assert "pickup" not in sfx._last
+        sfx.play_events(["unknown_cue"], now=12.0)  # ignored, no crash
+    finally:
+        pygame.mixer.quit()
 
 
 def test_gun_kick_on_fire():

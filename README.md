@@ -32,6 +32,13 @@ Neon-vector look, all drawn in code — no image assets:
 
 See [CHANGELOG.md](CHANGELOG.md) (v0.5.0) for details.
 
+## Sound
+
+Procedural sound effects, synthesized at startup (no audio files):
+kills, blasts, mortar launches and landings, pickups, area effects,
+game over and new best. Frequent events are rate-limited so busy
+moments don't turn into noise. **M** toggles sound.
+
 ## Status
 
 Work in progress. Branched from the turn-based Bricks game.
