@@ -15,6 +15,8 @@
 - The game logic stays audio-free: it queues cue names
   (`Game.drain_events`) that `sound.py` plays each frame
 - README: Graphics section and a gameplay/menu screenshot
+- Fix: the mouse cursor stayed hidden on the menu and help screens
+  after leaving a game with Esc
 
 ## v0.5.0 — Neon graphics (2026-09-24)
 
