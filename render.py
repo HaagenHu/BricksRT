@@ -138,6 +138,16 @@ def _mix(a: tuple[int, int, int], b: tuple[int, int, int],
     return tuple(int(x + (y - x) * t) for x, y in zip(a, b))
 
 
+def _blit_centered(screen: pygame.Surface, txt: pygame.Surface,
+                   center: tuple[float, float]):
+    """Blit rendered text so its visible glyphs (not its line box) are
+    centered on the point. Bahnschrift's line box sits ~3px low around
+    its capitals, so box-centering floats labels above their shapes."""
+    ink = txt.get_bounding_rect()
+    screen.blit(txt, (int(center[0] - ink.centerx),
+                      int(center[1] - ink.centery)))
+
+
 # Additive glow: radial-gradient sprites on black, blitted with
 # BLEND_ADD (black adds nothing). Built once and cached — never per
 # frame. Color, radius and strength are quantized so the cache stays
@@ -279,7 +289,7 @@ def _pill(screen: pygame.Surface, font: pygame.font.Font, text: str,
     pygame.draw.rect(screen, SLOT_BG, r, border_radius=r.height // 2)
     pygame.draw.rect(screen, _mix(BG_COLOR, color, 0.7), r, 1,
                      border_radius=r.height // 2)
-    screen.blit(txt, txt.get_rect(center=center))
+    _blit_centered(screen, txt, center)
 
 
 # Glowing text (titles, overlays): the text blurred on black, blitted
@@ -349,8 +359,7 @@ def _button(screen: pygame.Surface, rect: pygame.Rect, label: str,
         edge = CROSSHAIR_COLOR
     pygame.draw.rect(screen, fill, rect, border_radius=8)
     pygame.draw.rect(screen, edge, rect, 2, border_radius=8)
-    txt = font.render(label, True, TEXT_COLOR)
-    screen.blit(txt, txt.get_rect(center=rect.center))
+    _blit_centered(screen, font.render(label, True, TEXT_COLOR), rect.center)
 
 
 _freeze_tint: pygame.Surface | None = None
@@ -427,8 +436,7 @@ def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
     pygame.draw.circle(screen, color, (cx, cy), radius)
     if ptype == "mine":
         pygame.draw.circle(screen, (220, 60, 60), (cx, cy), radius, 2)
-    txt = font.render(label, True, BG_COLOR)
-    screen.blit(txt, txt.get_rect(center=(cx, cy)))
+    _blit_centered(screen, font.render(label, True, BG_COLOR), (cx, cy))
 
 
 def draw_freeze_icon(screen: pygame.Surface, fx: int, fy: int):
@@ -633,8 +641,8 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                                  (gx, gy + arm), 1)
 
     # HP text
-    txt = font.render(str(brick.hp), True, TEXT_COLOR)
-    screen.blit(txt, txt.get_rect(center=rect.center))
+    _blit_centered(screen, font.render(str(brick.hp), True, TEXT_COLOR),
+                   rect.center)
 
 
 def draw_dying_brick(screen: pygame.Surface, d: dict):
@@ -1197,8 +1205,8 @@ def draw_game(screen: pygame.Surface, game: Game,
         pygame.draw.circle(screen, color, (mx, slot_cy), 11)
         if stocked:
             _bevel_circle(screen, (mx, slot_cy), 11, color)
-        t = small_font.render(label, True, BG_COLOR)
-        screen.blit(t, t.get_rect(center=(mx, slot_cy)))
+        _blit_centered(screen, small_font.render(label, True, BG_COLOR),
+                       (mx, slot_cy))
         cnt_color = TEXT_COLOR if count > 0 else (100, 100, 120)
         cnt = small_font.render(str(count), True, cnt_color)
         screen.blit(cnt, cnt.get_rect(center=(mx, slot_cy + 24)))
