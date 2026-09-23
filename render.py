@@ -1159,7 +1159,7 @@ def draw_game(screen: pygame.Surface, game: Game,
         count_color = tuple(int(c * (1 - mix) + s * mix)
                             for c, s in zip(count_color, SKULL_COLOR))
     count_txt = font.render(ammo_label, True, count_color)
-    screen.blit(count_txt, (12 + 5 * 16 + 6, bullet_cy - 12))
+    screen.blit(count_txt, (12 + 5 * 16 + 6, bullet_cy - 15))
 
     # In-flight / reloading / gun load indicator
     sub_parts: list[str] = []
@@ -1179,7 +1179,8 @@ def draw_game(screen: pygame.Surface, game: Game,
     if sub_parts:
         fly_txt = _ui_font(15, bold=False).render("  ".join(sub_parts), True,
                                                   (130, 130, 160))
-        screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 6))
+        # Below the count with a small gap (their ink must not touch)
+        screen.blit(fly_txt, (12 + 5 * 16 + 6, bullet_cy + 10))
 
     # Shared ammo — one inset slot per type (right side): beveled type
     # ball with its count below; the selected slot gets a rim in its
