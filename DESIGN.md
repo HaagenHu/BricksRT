@@ -232,12 +232,19 @@ Juice over art assets — ranked by impact per effort:
    shards of its own color (`Game.shards`, own RNG)
 2. Projectile trails — **implemented**: last 8 positions as a tapering,
    fading streak — makes ricochet paths readable (core mechanic!)
-3. Screen shake: decaying random offset on bomb/wall break/skull
+3. Screen shake — **implemented**: trauma (0..1) added by blasts, wall
+   breaks and skulls, drained over time; the field (not HUD, gun or
+   crosshair) scrolls by trauma^2 x 10px
 4. Additive glow — **implemented**: `BLEND_ADD` over cached
    radial-gradient sprites for projectiles/shells/explosions/pickups;
    bricks get a blurred HP-color halo pass plus a light rim
-5. Brick depth + damage states: dark bottom-right edge, light top
-   edge; cracks below ~30% of spawn HP (needs `max_hp` on Brick)
+5. Brick depth + damage states — **implemented**: bevel lit from the
+   top-left on every shape; cracks at <60% and <30% of `max_hp` (one
+   of 64 cached layouts per brick)
+8. Layered explosions — **implemented**: white-hot core, fading glow,
+   shockwave ring, spark streaks and smoke puffs
+9. Mortar landing reticle — **implemented**: the round's footprint at
+   the target (dashed line for walls) plus a ring closing in on landing
 6. Spawn/death animation — **implemented**: rows slide down from
    behind the HUD; killed bricks shrink out over ~0.12s
 7. Ambient depth — **implemented**: three parallax star layers drift

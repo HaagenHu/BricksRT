@@ -15,6 +15,18 @@
 - **Shatter on kill**: killed bricks pop white-hot and burst into 8-12
   spinning shards of their color that fall and fade (capped at 500;
   own RNG, so gameplay randomness is untouched)
+- **Screen shake** on blasts, wall breaks (with sparks along the line)
+  and skulls; only the field moves — HUD, gun and crosshair stay still
+- **Brick depth + cracks**: every shape is beveled (lit from the
+  top-left); bricks crack below 60% and again below 30% of their
+  starting HP (new `Brick.max_hp`)
+- **Layered explosions**: white-hot core, fading glow, shockwave ring,
+  spark streaks and drifting smoke
+- **Mortar reticle**: in-flight rounds mark their footprint at the
+  target (blast/zone radius, dashed line for walls) with a ring closing
+  in as the shell lands, and leave a fading arc trail
+- Perf: acid/tar discs are cached, freeze/skull rings draw directly
+  instead of allocating screen-sized alpha surfaces every frame
 
 ## v0.4.0 — Unified ammo, panic buttons, juice (2026-07-02)
 

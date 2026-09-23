@@ -5,7 +5,7 @@ import math
 import os
 import random
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pygame
 
@@ -80,6 +80,22 @@ SHARD_GRAVITY = 520.0      # px/s^2
 SHARD_MAX = 500            # oldest dropped past this (mass bomb kills)
 TRAIL_LEN = 8              # projectile positions kept for the trail
 _FX_RNG = random.Random()
+
+# Explosion debris (visual only): fast spark streaks + slow smoke puffs
+SPARK_COUNT = 14
+SPARK_LIFE = (0.2, 0.45)
+SPARK_SPEED = (220, 520)
+SMOKE_PUFFS = 4
+SMOKE_LIFE = (0.7, 1.1)
+PARTICLE_MAX = 400         # per list (sparks, smoke)
+
+# Screen shake "trauma" 0..1 (visual only): events add, time drains it;
+# the renderer offsets the field by trauma^2 so small bumps stay subtle
+SHAKE_BOMB = 0.3
+SHAKE_WALL_BREAK = 0.45
+SHAKE_SKULL = 0.7
+SHAKE_DECAY = 1.8          # trauma drained per second
+CRACK_PATTERNS = 64        # distinct crack layouts bricks draw from
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -193,6 +209,16 @@ class Brick:
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
     acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
     acid_tick: float = 0.0  # DoT accumulator toward the next damage
+    # Visual only: HP at creation (cracks show damage against it) and a
+    # crack layout id; excluded from equality like an identity would be
+    max_hp: int = field(default=0, compare=False)
+    crack_seed: int = field(default=-1, compare=False)
+
+    def __post_init__(self):
+        if self.max_hp <= 0:
+            self.max_hp = self.hp
+        if self.crack_seed < 0:
+            self.crack_seed = _FX_RNG.randrange(CRACK_PATTERNS)
 
     def cells(self) -> list[tuple[int, int]]:
         """Grid cells occupied by this brick."""
@@ -383,6 +409,11 @@ class Game:
         self.dying_bricks: list[dict] = []
         # Kill shards: {x, y, vx, vy, rot, spin, size, hp, life, timer}
         self.shards: list[dict] = []
+        # Explosion sparks {x, y, vx, vy, color, life, timer} and smoke
+        # puffs {x, y, r, vr, life, timer}
+        self.sparks: list[dict] = []
+        self.smoke: list[dict] = []
+        self.shake = 0.0  # screen-shake trauma, 0..1
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -630,7 +661,14 @@ class Game:
                 w["grace"] -= dt
                 continue
             w["ttl"] -= dt
-            if w["ttl"] <= 0 or self.wall_weight >= w["max_weight"]:
+            if self.wall_weight >= w["max_weight"]:
+                # Overloaded: it breaks — sparks along the line + shake
+                dead_walls.append(w)
+                self._add_shake(SHAKE_WALL_BREAK)
+                for i in range(6):
+                    self._spawn_sparks((i + 0.5) * WIDTH / 6, w["y"], 4,
+                                       (255, 160, 40))
+            elif w["ttl"] <= 0:
                 dead_walls.append(w)
         if dead_walls:
             self.placed_walls = [w for w in self.placed_walls
@@ -670,7 +708,8 @@ class Game:
         self.dying_bricks = [d for d in self.dying_bricks if d["timer"] > 0]
         for d in self.dying_bricks:
             d["timer"] -= dt
-        self._update_shards(dt)
+        self._update_particles(dt)
+        self.shake = max(0.0, self.shake - SHAKE_DECAY * dt)
         for b in self.bricks:
             if b.spawn_t > 0:
                 b.spawn_t = max(0.0, b.spawn_t - dt)
@@ -761,7 +800,37 @@ class Game:
         if len(self.shards) > SHARD_MAX:
             del self.shards[:len(self.shards) - SHARD_MAX]
 
-    def _update_shards(self, dt: float):
+    def _spawn_sparks(self, x: float, y: float, count: int,
+                      color: tuple[int, int, int] = (255, 190, 90)):
+        rng = _FX_RNG
+        for _ in range(count):
+            ang = rng.uniform(0, math.tau)
+            speed = rng.uniform(*SPARK_SPEED)
+            life = rng.uniform(*SPARK_LIFE)
+            self.sparks.append({
+                "x": x, "y": y,
+                "vx": math.cos(ang) * speed, "vy": math.sin(ang) * speed,
+                "color": color, "life": life, "timer": life,
+            })
+        if len(self.sparks) > PARTICLE_MAX:
+            del self.sparks[:len(self.sparks) - PARTICLE_MAX]
+
+    def _spawn_smoke(self, x: float, y: float):
+        rng = _FX_RNG
+        for _ in range(SMOKE_PUFFS):
+            life = rng.uniform(*SMOKE_LIFE)
+            self.smoke.append({
+                "x": x + rng.uniform(-18, 18), "y": y + rng.uniform(-18, 18),
+                "r": rng.uniform(12, 20), "vr": rng.uniform(30, 55),
+                "life": life, "timer": life,
+            })
+        if len(self.smoke) > PARTICLE_MAX:
+            del self.smoke[:len(self.smoke) - PARTICLE_MAX]
+
+    def _add_shake(self, amount: float):
+        self.shake = min(1.0, self.shake + amount)
+
+    def _update_particles(self, dt: float):
         drag = max(0.0, 1 - 1.8 * dt)
         for s in self.shards:
             s["timer"] -= dt
@@ -771,6 +840,20 @@ class Game:
             s["y"] += s["vy"] * dt
             s["rot"] += s["spin"] * dt
         self.shards = [s for s in self.shards if s["timer"] > 0]
+        spark_drag = max(0.0, 1 - 4.0 * dt)
+        for s in self.sparks:
+            s["timer"] -= dt
+            s["vx"] *= spark_drag
+            s["vy"] *= spark_drag
+            s["x"] += s["vx"] * dt
+            s["y"] += s["vy"] * dt
+        self.sparks = [s for s in self.sparks if s["timer"] > 0]
+        for s in self.smoke:
+            s["timer"] -= dt
+            s["r"] += s["vr"] * dt
+            s["vr"] *= max(0.0, 1 - 1.5 * dt)
+            s["y"] -= 12 * dt  # drifts up a little
+        self.smoke = [s for s in self.smoke if s["timer"] > 0]
 
     def _in_tar(self, brick: Brick) -> bool:
         """True if the brick touches any tar zone."""
@@ -1797,6 +1880,7 @@ class Game:
             "speed": 800,
         }
         self.ammo_flash = AMMO_FLASH_TIME
+        self._add_shake(SHAKE_SKULL)
 
     def _collide_placed_aoe(self, proj: Projectile, placed: list[dict],
                             trigger):
@@ -1886,6 +1970,9 @@ class Game:
                 self._explode(mine["x"], mine["y"])
 
         self.explosions.append({"x": ex, "y": ey, "timer": 0.4})
+        self._spawn_sparks(ex, ey, SPARK_COUNT)
+        self._spawn_smoke(ex, ey)
+        self._add_shake(SHAKE_BOMB)
 
     def _update_acids(self, dt: float):
         """Tick placed acid zones: damage bricks within radius each second."""

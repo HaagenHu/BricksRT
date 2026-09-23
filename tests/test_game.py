@@ -402,6 +402,32 @@ def test_hit_flash_shards_and_trail():
     assert p.trail[0][1] > p.trail[-1][1]  # moving up: older = lower
 
 
+def test_explosion_fx_and_shake():
+    gm = _fresh_game(wave=10)
+    # Bricks remember their starting HP (for cracks); visual-only
+    # fields stay out of equality
+    b = Brick(col=1, row=2, hp=9)
+    assert b.max_hp == 9 and 0 <= b.crack_seed < g.CRACK_PATTERNS
+    assert Brick(col=1, row=2, hp=9, crack_seed=1) == \
+        Brick(col=1, row=2, hp=9, crack_seed=2)
+
+    # A blast throws sparks + smoke and shakes the screen, all of which
+    # drain away; effects never draw from the gameplay RNG
+    gm.bricks = []
+    state = random.getstate()
+    gm._explode(200, 300)
+    assert random.getstate() == state
+    assert len(gm.sparks) == g.SPARK_COUNT
+    assert len(gm.smoke) == g.SMOKE_PUFFS
+    assert gm.shake == g.SHAKE_BOMB
+    for _ in range(4):  # chained blasts stack but cap at 1
+        gm._explode(200, 300)
+    assert gm.shake == 1.0
+    for _ in range(int(g.SMOKE_LIFE[1] * 60) + 2):
+        gm.update(1 / 60)
+    assert not gm.sparks and not gm.smoke and gm.shake == 0.0
+
+
 def test_tar_slows_bricks_in_zone():
     gm = _fresh_game(wave=6)
     gm.bricks = [

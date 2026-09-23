@@ -39,6 +39,26 @@ SKULL_COLOR = (200, 100, 255)
 GAMEOVER_OVERLAY = (0, 0, 0, 180)
 HUD_BG = (30, 30, 45)
 
+SHAKE_PX = 10  # max field offset at full shake trauma
+
+# Mortar landing reticle radius per round type (px)
+MORTAR_FOOTPRINT = {
+    "bomb": BOMB_RADIUS_CELLS * CELL_SIZE,
+    "homing": BOMB_RADIUS_CELLS * CELL_SIZE,
+    "acid": ACID_RADIUS_CELLS * CELL_SIZE,
+    "tar": TAR_RADIUS_CELLS * CELL_SIZE,
+    "mine": 12,
+}
+
+
+def _shell_pos(shell: dict, t: float) -> tuple[float, float]:
+    """Point on a mortar shell's parabolic arc at progress t (0..1)."""
+    sx, sy, tx, ty = shell["sx"], shell["sy"], shell["tx"], shell["ty"]
+    arc_height = min(150, math.hypot(tx - sx, ty - sy) * 0.4)
+    return (sx + (tx - sx) * t,
+            sy + (ty - sy) * t - arc_height * math.sin(t * math.pi))
+
+
 # Field pickup style: type -> (color, label, radius factor)
 PICKUP_STYLE = {
     "ammo": (COLLECTIBLE_COLOR, "+", 0.20),
@@ -120,7 +140,9 @@ _glow_cache: dict[tuple, pygame.Surface] = {}
 def _glow_sprite(color: tuple[int, int, int], radius: int,
                  strength: float) -> pygame.Surface:
     color = tuple(c // 16 * 16 for c in color)
-    radius = max(4, (radius + 3) // 4 * 4)
+    # Fine steps for small sprites, coarse for big ones (memory)
+    step = 4 if radius <= 32 else 16
+    radius = max(4, (radius + step - 1) // step * step)
     level = max(1, min(GLOW_LEVELS, round(strength * GLOW_LEVELS)))
     key = (color, radius, level)
     surf = _glow_cache.get(key)
@@ -172,6 +194,122 @@ def _brick_halo(shape: str, tri_dir: str,
         surf = pygame.transform.gaussian_blur(surf, 6)
         _halo_cache[key] = surf
     return surf
+
+
+# Translucent discs (acid/tar zones) and smoke puffs: SRCALPHA sprites
+# cached per radius and quantized alpha instead of rebuilt every frame
+_disc_cache: dict[tuple, pygame.Surface] = {}
+_smoke_cache: dict[int, pygame.Surface] = {}
+
+
+def _alpha_disc(color: tuple[int, int, int], radius: int,
+                alpha: int) -> pygame.Surface:
+    key = (color, radius, alpha // 8)
+    surf = _disc_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (*color, alpha // 8 * 8),
+                           (radius, radius), radius)
+        _disc_cache[key] = surf
+    return surf
+
+
+def _smoke_sprite(radius: int) -> pygame.Surface:
+    radius = max(8, (radius + 7) // 8 * 8)
+    surf = _smoke_cache.get(radius)
+    if surf is None:
+        surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        # Concentric fills overwrite (no blending) -> soft radial falloff
+        for r in range(radius, 0, -1):
+            a = int(120 * (1 - r / radius) ** 1.5)
+            pygame.draw.circle(surf, (75, 72, 88, a), (radius, radius), r)
+        _smoke_cache[radius] = surf
+    return surf
+
+
+# Brick bevel: light from the top-left — edges facing it are lighter,
+# edges facing away darker, so flat fills read as raised tiles
+LIGHT_DIR = (-0.6, -0.8)
+
+
+def _bevel_colors(color):
+    return _mix(color, TEXT_COLOR, 0.5), _mix(color, (0, 0, 0), 0.45)
+
+
+def _bevel_polygon(screen: pygame.Surface, pts, color):
+    hi, lo = _bevel_colors(color)
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    for a, b in zip(pts, pts[1:] + pts[:1]):
+        # Outward direction ~ edge midpoint minus centroid (convex)
+        ox = (a[0] + b[0]) / 2 - cx
+        oy = (a[1] + b[1]) / 2 - cy
+        lit = ox * LIGHT_DIR[0] + oy * LIGHT_DIR[1] > 0
+        pygame.draw.line(screen, hi if lit else lo, a, b, 2)
+
+
+def _bevel_rect(screen: pygame.Surface, r: pygame.Rect, color):
+    hi, lo = _bevel_colors(color)
+    pygame.draw.line(screen, hi, (r.left + 3, r.top + 1),
+                     (r.right - 4, r.top + 1), 2)
+    pygame.draw.line(screen, hi, (r.left + 1, r.top + 3),
+                     (r.left + 1, r.bottom - 4), 2)
+    pygame.draw.line(screen, lo, (r.left + 3, r.bottom - 2),
+                     (r.right - 4, r.bottom - 2), 2)
+    pygame.draw.line(screen, lo, (r.right - 2, r.top + 3),
+                     (r.right - 2, r.bottom - 4), 2)
+
+
+def _bevel_circle(screen: pygame.Surface, center, radius: int, color):
+    hi, lo = _bevel_colors(color)
+    box = pygame.Rect(0, 0, radius * 2, radius * 2)
+    box.center = center
+    # Angles run counter-clockwise from +x (y up): 45..225 deg = top-left
+    pygame.draw.arc(screen, hi, box, math.pi / 4, 5 * math.pi / 4, 2)
+    pygame.draw.arc(screen, lo, box, 5 * math.pi / 4, 9 * math.pi / 4, 2)
+
+
+# Damage cracks: each layout is 5 jagged polylines in unit space (half
+# size 1) radiating from near the center. Stage 1 (<60% hp) draws the
+# first 2, stage 2 (<30%) all 5. Built once per layout.
+_crack_cache: dict[int, list[list[tuple[float, float]]]] = {}
+CRACK_REACH = {"diamond": 0.6, "triangle": 0.45, "trapezoid": 0.75}
+
+
+def _crack_layout(seed: int) -> list[list[tuple[float, float]]]:
+    lines = _crack_cache.get(seed)
+    if lines is None:
+        rng = random.Random(seed)
+        lines = []
+        base = rng.uniform(0, math.tau)
+        for i in range(5):
+            ang = base + i * math.tau / 5 + rng.uniform(-0.4, 0.4)
+            x, y = rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12)
+            pts = [(x, y)]
+            for _ in range(3):
+                ang += rng.uniform(-0.6, 0.6)
+                step = rng.uniform(0.22, 0.32)
+                x += math.cos(ang) * step
+                y += math.sin(ang) * step
+                pts.append((x, y))
+            lines.append(pts)
+        _crack_cache[seed] = lines
+    return lines
+
+
+def _draw_cracks(screen: pygame.Surface, brick: Brick, rect: pygame.Rect,
+                 color):
+    frac = brick.hp / brick.max_hp if brick.max_hp > 0 else 1.0
+    if frac > 0.6:
+        return
+    count = 2 if frac > 0.3 else 5
+    scale = min(rect.width, rect.height) / 2 * CRACK_REACH.get(brick.shape,
+                                                               0.85)
+    cx, cy = rect.center
+    dark = _mix(color, (0, 0, 0), 0.55)
+    for line in _crack_layout(brick.crack_seed)[:count]:
+        pts = [(cx + x * scale, cy + y * scale) for x, y in line]
+        pygame.draw.lines(screen, dark, False, pts, 2)
 
 
 def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
@@ -296,9 +434,6 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
     if brick.hit_t > 0:
         color = _mix(color, TEXT_COLOR, 0.75 * brick.hit_t / HIT_FLASH_TIME)
 
-    # Thin light edge keeps the face crisp against its own glow
-    rim = _mix(color, TEXT_COLOR, 0.45)
-
     frame_color = (FREEZE_COLOR if draw_ice_frame
                    else LIGHTNING_COLOR if draw_stun_frame
                    else TAR_COLOR if brick.slow_t > 0 and not reversing
@@ -307,22 +442,24 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
     pts = shape_points(shape, brick.tri_dir, *rect.center, BRICK_SIZE / 2)
     if shape == "round":
         pygame.draw.circle(screen, color, rect.center, BRICK_SIZE // 2)
+        _bevel_circle(screen, rect.center, BRICK_SIZE // 2, color)
         if frame_color:
             pygame.draw.circle(screen, frame_color, rect.center,
                                BRICK_SIZE // 2 + 2, 2)
-        else:
-            pygame.draw.circle(screen, rim, rect.center, BRICK_SIZE // 2, 1)
     elif pts is not None:  # diamond, hexagon, trapezoid, triangle
         pygame.draw.polygon(screen, color, pts)
-        pygame.draw.polygon(screen, frame_color or rim, pts,
-                            2 if frame_color else 1)
+        if frame_color:  # the frame sits on the edges, replacing the bevel
+            pygame.draw.polygon(screen, frame_color, pts, 2)
+        else:
+            _bevel_polygon(screen, pts, color)
     else:  # square, wide, tall
         pygame.draw.rect(screen, color, rect, border_radius=4)
+        _bevel_rect(screen, rect, color)
         if frame_color:
             pygame.draw.rect(screen, frame_color, rect.inflate(4, 4),
                              2, border_radius=5)
-        else:
-            pygame.draw.rect(screen, rim, rect, 1, border_radius=4)
+
+    _draw_cracks(screen, brick, rect, color)
 
     # Shield (shape-aware)
     if brick.shield > 0:
@@ -465,6 +602,14 @@ def draw_game(screen: pygame.Surface, game: Game,
         pygame.draw.polygon(screen, _mix(BG_COLOR, color, 0.35 + 0.65 * f),
                             pts)
 
+    # Explosion smoke: soft gray puffs that swell, drift up and thin out
+    for s in game.smoke:
+        f = s["timer"] / s["life"]
+        puff = _smoke_sprite(int(s["r"]))
+        puff.set_alpha(int(255 * f))
+        r = puff.get_width() // 2
+        screen.blit(puff, (int(s["x"]) - r, int(s["y"]) - r))
+
     # Sticky charges riding bricks: blinking mine dot
     for ch in game.sticky_charges:
         b = ch["brick"]
@@ -499,19 +644,16 @@ def draw_game(screen: pygame.Surface, game: Game,
         acid_r = int(ACID_RADIUS_CELLS * CELL_SIZE)
         pulse = 0.5 + 0.5 * math.sin(acid["timer"] * 3)
         alpha = int(40 + 30 * pulse)
-        surf = pygame.Surface((acid_r * 2, acid_r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(surf, (120, 255, 0, alpha),
-                           (acid_r, acid_r), acid_r)
-        screen.blit(surf, (ax - acid_r, ay - acid_r))
+        screen.blit(_alpha_disc((120, 255, 0), acid_r, alpha),
+                    (ax - acid_r, ay - acid_r))
         pygame.draw.circle(screen, MORTAR_ACID_COLOR, (ax, ay), acid_r, 1)
 
     # Placed tar zones (stationary, dark sticky circle)
     for tar in game.placed_tars:
         tx, ty = int(tar["x"]), int(tar["y"])
         tar_r = int(TAR_RADIUS_CELLS * CELL_SIZE)
-        surf = pygame.Surface((tar_r * 2, tar_r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(surf, (60, 50, 35, 90), (tar_r, tar_r), tar_r)
-        screen.blit(surf, (tx - tar_r, ty - tar_r))
+        screen.blit(_alpha_disc((60, 50, 35), tar_r, 90),
+                    (tx - tar_r, ty - tar_r))
         pygame.draw.circle(screen, TAR_COLOR, (tx, ty), tar_r, 1)
 
     # Placed walls (horizontal barrier line)
@@ -572,9 +714,10 @@ def draw_game(screen: pygame.Surface, game: Game,
             r = int(wave["radius"])
             if r > 0:
                 alpha = max(0, min(180, int(180 * (1 - wave["radius"] / wave["max_radius"]))))
-                surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-                pygame.draw.circle(surf, (*wcolor, alpha), (r, r), r, 3)
-                screen.blit(surf, (int(wave["x"]) - r, int(wave["y"]) - r))
+                # Direct ring blended toward the bg: these grow past the
+                # screen size, so a per-frame alpha surface would be huge
+                pygame.draw.circle(screen, _mix(BG_COLOR, wcolor, alpha / 255),
+                                   (int(wave["x"]), int(wave["y"])), r, 3)
 
     # Projectiles
     for p in game.projectiles:
@@ -617,34 +760,74 @@ def draw_game(screen: pygame.Surface, game: Game,
     # Mortar shells in flight
     for shell in game.mortar_shells:
         t = shell["t"]
-        sx, sy = shell["sx"], shell["sy"]
         tx, ty = shell["tx"], shell["ty"]
-        # Parabolic arc: lerp x/y with upward arc
-        x = sx + (tx - sx) * t
-        arc_height = min(150, math.hypot(tx - sx, ty - sy) * 0.4)
-        y = sy + (ty - sy) * t - arc_height * math.sin(t * math.pi)
-        sc = AMMO_STYLE.get(shell["type"], (TEXT_COLOR, "?"))[0]
+        mtype = shell["type"]
+        sc = AMMO_STYLE.get(mtype, (TEXT_COLOR, "?"))[0]
+
+        # Landing reticle: the round's footprint at the target, plus a
+        # ring that closes in on it as the shell comes down
+        foot = MORTAR_FOOTPRINT.get(mtype, 12)
+        dim = _mix(BG_COLOR, sc, 0.45)
+        itx, ity = int(tx), int(ty)
+        if mtype == "wall":
+            for dx in range(0, WIDTH, 16):
+                pygame.draw.line(screen, dim, (dx, ity), (dx + 8, ity), 2)
+        else:
+            pygame.draw.circle(screen, dim, (itx, ity), int(foot), 1)
+        pygame.draw.circle(screen, sc, (itx, ity),
+                           int(foot * (1 - t)) + 4, 2)
+
+        # Fading trail along the arc, then the shell itself
+        prev = _shell_pos(shell, t)
+        for k in range(1, 7):
+            t2 = t - k * 0.025
+            if t2 <= 0:
+                break
+            cur = _shell_pos(shell, t2)
+            f = 1 - k / 7
+            pygame.draw.line(screen, _mix(BG_COLOR, sc, f),
+                             (int(prev[0]), int(prev[1])),
+                             (int(cur[0]), int(cur[1])),
+                             max(1, int(4 * f)))
+            prev = cur
+        x, y = _shell_pos(shell, t)
         draw_glow(screen, sc, x, y, 20, 0.8)
         pygame.draw.circle(screen, sc, (int(x), int(y)), 6)
-        # Trail
-        if t > 0.05:
-            t2 = t - 0.05
-            x2 = sx + (tx - sx) * t2
-            y2 = sy + (ty - sy) * t2 - arc_height * math.sin(t2 * math.pi)
-            pygame.draw.line(screen, sc, (int(x2), int(y2)),
-                             (int(x), int(y)), 2)
 
-    # Explosions
+    # Explosions: white-hot core for the first moments, hot glow that
+    # fades, and a shockwave ring racing out past the blast radius
+    blast_px = BOMB_RADIUS_CELLS * CELL_SIZE
     for e in game.explosions:
-        alpha = max(0, min(255, int(255 * e["timer"] / 0.4)))
-        radius = int(BOMB_RADIUS_CELLS * CELL_SIZE
-                     * (1 - e["timer"] / 0.4) + 10)
-        surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
-        pygame.draw.circle(surf, (255, 150, 50, alpha),
-                           (radius, radius), radius)
-        screen.blit(surf, (int(e["x"]) - radius, int(e["y"]) - radius))
-        draw_glow(screen, (255, 170, 80), e["x"], e["y"],
-                  radius * 1.5, alpha / 255)
+        age = 1 - max(0.0, e["timer"]) / 0.4  # 0 -> 1
+        ex, ey = e["x"], e["y"]
+        draw_glow(screen, (255, 160, 70), ex, ey, blast_px * 1.2, 1 - age)
+        if age < 0.25:
+            draw_glow(screen, TEXT_COLOR, ex, ey, blast_px * 0.6,
+                      1 - age / 0.25)
+        ring_r = int(blast_px * (0.3 + 0.9 * age ** 0.6))
+        pygame.draw.circle(screen, _mix(BG_COLOR, (255, 215, 160), 1 - age),
+                           (int(ex), int(ey)), ring_r,
+                           max(1, int(6 * (1 - age))))
+
+    # Explosion sparks: short streaks along their velocity
+    for s in game.sparks:
+        f = s["timer"] / s["life"]
+        x, y = s["x"], s["y"]
+        tail = (x - s["vx"] * 0.03, y - s["vy"] * 0.03)
+        color = _mix(BG_COLOR, s["color"], f)
+        pygame.draw.line(screen, color, (int(tail[0]), int(tail[1])),
+                         (int(x), int(y)), 2)
+        draw_glow(screen, s["color"], x, y, 8, 0.5 * f)
+
+    # Screen shake: nudge the whole field (HUD, gun and crosshair stay
+    # put so aiming never shakes). Deterministic wobble from game time.
+    if game.shake > 0 and game.phase == "playing":
+        amp = SHAKE_PX * game.shake ** 2
+        t = game.game_time
+        dx = int(amp * math.sin(t * 91.0) * math.cos(t * 23.0))
+        dy = int(amp * math.cos(t * 83.0) * math.sin(t * 31.0 + 1.3))
+        if dx or dy:
+            screen.scroll(dx, dy)
 
     screen.set_clip(None)
 
