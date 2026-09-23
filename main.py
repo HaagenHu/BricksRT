@@ -91,6 +91,11 @@ def main():
 
         mouse_pos = pygame.mouse.get_pos()
 
+        # Hide the system cursor only while the crosshair is shown. Set
+        # every frame before the menu branch: Esc from play goes straight
+        # to the menu, which must bring the cursor back
+        pygame.mouse.set_visible(game.phase != "playing")
+
         if game.phase == "menu":
             if show_help:
                 draw_help(screen, font, small_font)
@@ -108,9 +113,6 @@ def main():
             game.update(dt)
         # Cues from this frame's input (mortar fire) and update
         sfx.play_events(game.drain_events())
-
-        # Hide system cursor when crosshair is shown
-        pygame.mouse.set_visible(game.phase != "playing")
 
         draw_game(screen, game, font, small_font, muted=sfx.muted)
         pygame.display.flip()
