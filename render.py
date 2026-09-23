@@ -49,6 +49,22 @@ GRID_DOT = (46, 46, 70)
 TURRET_METAL = (92, 96, 128)
 
 SHAKE_PX = 10  # max field offset at full shake trauma
+BRICK_HP_SIZE = 20  # px, brick HP number (the HUD's small text is 16)
+BRICK_HP_MIN = 14   # smallest step-down for long numbers
+# Widest HP number (px) that stays inside each shape at its center line;
+# longer numbers step the font down toward BRICK_HP_MIN
+HP_FIT = {"triangle": 28, "diamond": 34}
+HP_FIT_DEFAULT = 44
+
+
+def _hp_text(brick: Brick, color) -> pygame.Surface:
+    """Brick HP at BRICK_HP_SIZE, shrunk just enough to fit the shape."""
+    text = str(brick.hp)
+    limit = HP_FIT.get(brick.shape, HP_FIT_DEFAULT)
+    size = BRICK_HP_SIZE
+    while size > BRICK_HP_MIN and _ui_font(size).size(text)[0] > limit:
+        size -= 1
+    return _ui_font(size).render(text, True, color)
 
 # Mortar landing reticle radius per round type (px)
 MORTAR_FOOTPRINT = {
@@ -436,7 +452,13 @@ def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
     pygame.draw.circle(screen, color, (cx, cy), radius)
     if ptype == "mine":
         pygame.draw.circle(screen, (220, 60, 60), (cx, cy), radius, 2)
-    _blit_centered(screen, font.render(label, True, BG_COLOR), (cx, cy))
+    if label == "+":
+        # Drawn, not typed: the glyph is only ~7px at this font size
+        arm = radius - 5
+        pygame.draw.line(screen, BG_COLOR, (cx - arm, cy), (cx + arm, cy), 3)
+        pygame.draw.line(screen, BG_COLOR, (cx, cy - arm), (cx, cy + arm), 3)
+    else:
+        _blit_centered(screen, font.render(label, True, BG_COLOR), (cx, cy))
 
 
 def draw_freeze_icon(screen: pygame.Surface, fx: int, fy: int):
@@ -515,8 +537,7 @@ def danger_pulse_at(time: float) -> float:
     return 0.5 + 0.5 * math.sin(time * DANGER_PULSE_SPEED)
 
 
-def draw_brick(screen: pygame.Surface, brick: Brick,
-               font: pygame.font.Font, y_offset: float = 0,
+def draw_brick(screen: pygame.Surface, brick: Brick, y_offset: float = 0,
                danger: float | None = None, time: float = 0.0,
                frozen: bool = False, in_acid: bool = False,
                reversing: bool = False, stunned: bool = False):
@@ -656,8 +677,7 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                                  (gx, gy + arm), 1)
 
     # HP text
-    _blit_centered(screen, font.render(str(brick.hp), True, TEXT_COLOR),
-                   rect.center)
+    _blit_centered(screen, _hp_text(brick, TEXT_COLOR), rect.center)
 
 
 def draw_dying_brick(screen: pygame.Surface, d: dict):
@@ -762,7 +782,7 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     for brick, boff in placed:
         danger = _brick_danger(brick, boff, danger_y)
-        draw_brick(screen, brick, small_font, boff, danger, game.game_time,
+        draw_brick(screen, brick, boff, danger, game.game_time,
                    game.freeze_timer > 0, brick.acid_t > 0,
                    game.reverse_timer > 0, brick.stun > 0)
 
@@ -1394,20 +1414,24 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     header_color = (150, 150, 180)
     text_color = (200, 200, 215)
     text_font = _ui_font(16, bold=False)  # long lines: regular fits
+    # Rows center on their icon by cap height (not the line box, which
+    # sits low in Bahnschrift), so every line aligns the same way
+    cap_dy = text_font.render("H", True, text_color).get_bounding_rect().centery
+    header_gap, row_gap, section_gap = 40, 38, 18
     y = 84
 
     def header(label: str):
         nonlocal y
         t = text_font.render(label, True, header_color)
         screen.blit(t, (24, y))
-        y += 28
+        y += header_gap
 
     def row(icon_fn, desc: str):
         nonlocal y
         icon_fn(y)
         t = text_font.render(desc, True, text_color)
-        screen.blit(t, (text_x, y - 9))
-        y += 28
+        screen.blit(t, (text_x, y - cap_dy))
+        y += row_gap
 
     def pickup(ptype):
         return lambda ry: draw_pickup_icon(screen, small_font, ptype,
@@ -1428,7 +1452,7 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(pickup("homing"),
         f"Homing — rocket / steering shots (wave {UNLOCK['homing']}+)")
 
-    y += 8
+    y += section_gap
     header("AOE — shoot it, or it fires when a brick touches it")
     row(lambda ry: draw_freeze_icon(screen, icon_x, ry),
         f"Freeze — stops advance 5s (wave {UNLOCK['freeze']}+)")
