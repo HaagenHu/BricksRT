@@ -1,12 +1,11 @@
 # Changelog
 
-## Unreleased — Neon graphics
+## v0.5.0 — Neon graphics (2026-09-24)
 
 - **Additive glow**: projectiles, mortar shells, explosions, lightning,
   pickups, placed traps, gun and crosshair glow via cached radial
   sprites (`BLEND_ADD`); bricks get a blurred halo in their HP color
-  (drawn in its own pass, so it lights only the gaps) and a thin light
-  rim
+  (drawn in its own pass, so it lights only the gaps)
 - **Projectile trails**: each shot keeps its last 8 positions, drawn as
   a tapering, fading streak in the shot's color — ricochets are
   readable in big volleys
@@ -18,6 +17,10 @@
 - **Screen shake** on blasts, wall breaks (with sparks along the line)
   and skulls; only the field moves — HUD, gun and crosshair stay still
 - **Brick depth**: every shape is beveled (lit from the top-left)
+- **Danger flash**: bricks in the last row before the death line pulse
+  toward white (the old pulse went toward red, so red high-HP bricks
+  barely changed) with a pulsing red outline and glow, stronger the
+  closer they get; capped so the HP number stays readable
 - **Layered explosions**: white-hot core, fading glow, shockwave ring,
   spark streaks and drifting smoke
 - **Mortar reticle**: in-flight rounds mark their footprint at the
@@ -39,10 +42,13 @@
 - **HUD**: gradient panels with an azure edge line; muted WAVE / BEST
   labels beside bright values; freeze/reverse timers as badges; ammo
   slots are inset tiles with beveled balls, the selected one rimmed and
-  glowing in its type color
+  glowing in its type color; the gun status line (flying / reload /
+  load) sits below the ammo count with a gap instead of touching it
 - **Typeface**: Bahnschrift (DIN-style, ships with Windows 10+), Arial
   fallback; dense text (help rows, HUD status line) uses its regular
-  weight so it fits
+  weight so it fits. Labels inside shapes (pickup and slot letters,
+  brick HP, buttons, badges) are centered by their glyphs, since
+  Bahnschrift's line box sits ~3px low
 - **Menu**: hue-cycling glowing title, dimmed demo bricks drifting down
   and shattering behind it, buttons that light up on hover; PAUSED /
   GAME OVER / NEW BEST! and the help title glow too
