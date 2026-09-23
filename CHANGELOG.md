@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Neon graphics
+
+- **Additive glow**: projectiles, mortar shells, explosions, lightning,
+  pickups, placed traps, gun and crosshair glow via cached radial
+  sprites (`BLEND_ADD`); bricks get a blurred halo in their HP color
+  (drawn in its own pass, so it lights only the gaps) and a thin light
+  rim
+- **Projectile trails**: each shot keeps its last 8 positions, drawn as
+  a tapering, fading streak in the shot's color — ricochets are
+  readable in big volleys
+- **Hit flash**: bricks flash white for 60ms on every damaging hit
+  (gun, fire, blasts, lightning)
+- **Shatter on kill**: killed bricks pop white-hot and burst into 8-12
+  spinning shards of their color that fall and fade (capped at 500;
+  own RNG, so gameplay randomness is untouched)
+
 ## v0.4.0 — Unified ammo, panic buttons, juice (2026-07-02)
 
 ### Unified ammo system

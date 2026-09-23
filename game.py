@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+from collections import deque
 from dataclasses import dataclass
 
 import pygame
@@ -68,6 +69,17 @@ ADVANCE_SPEED_MAX = 25.0   # cap
 
 SPAWN_ANIM_TIME = 0.2   # seconds a new row slides in from behind the HUD
 DEATH_ANIM_TIME = 0.12  # seconds a killed brick shrinks out
+HIT_FLASH_TIME = 0.06   # white flash on a damaged brick (visual only)
+
+# Kill shards (visual only): a burst of spinning triangles in the
+# brick's color. Own RNG so effects never shift gameplay randomness.
+SHARD_COUNT = (8, 12)      # min/max shards per kill
+SHARD_LIFE = (0.35, 0.7)   # seconds
+SHARD_SPEED = (90, 260)    # px/s outward
+SHARD_GRAVITY = 520.0      # px/s^2
+SHARD_MAX = 500            # oldest dropped past this (mass bomb kills)
+TRAIL_LEN = 8              # projectile positions kept for the trail
+_FX_RNG = random.Random()
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -176,6 +188,7 @@ class Brick:
     lag: float = 0.0     # px behind the global offset (from stuns)
     spawn_t: float = 0.0  # slide-in animation remaining (visual only)
     flash: float = 0.0   # skull-sweep flash remaining (visual only)
+    hit_t: float = 0.0   # hit flash remaining (visual only)
     slow_pct: float = 0.0  # tar-bullet slow, 0..1 (0.15 per hit)
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
     acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
@@ -215,6 +228,8 @@ class Projectile:
         self.acid = False
         self.wallshot = False
         self.mine = False
+        # Recent positions, oldest first (visual only)
+        self.trail: deque[tuple[float, float]] = deque(maxlen=TRAIL_LEN)
 
     def _min_rebound(self, axis: str, direction: float):
         """Force the rebound at least MIN_BOUNCE_ANGLE off the border,
@@ -232,6 +247,7 @@ class Projectile:
     def update(self, dt: float):
         if not self.alive:
             return
+        self.trail.append((self.pos.x, self.pos.y))
         self.pos += self.vel * dt
 
         # Wall bounces
@@ -365,6 +381,8 @@ class Game:
         # Shrinking ghosts of killed bricks: {shape, tri_dir, cx, cy,
         # hp, timer}
         self.dying_bricks: list[dict] = []
+        # Kill shards: {x, y, vx, vy, rot, spin, size, hp, life, timer}
+        self.shards: list[dict] = []
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -652,11 +670,14 @@ class Game:
         self.dying_bricks = [d for d in self.dying_bricks if d["timer"] > 0]
         for d in self.dying_bricks:
             d["timer"] -= dt
+        self._update_shards(dt)
         for b in self.bricks:
             if b.spawn_t > 0:
                 b.spawn_t = max(0.0, b.spawn_t - dt)
             if b.flash > 0:
                 b.flash = max(0.0, b.flash - dt)
+            if b.hit_t > 0:
+                b.hit_t = max(0.0, b.hit_t - dt)
         self.ammo_flash = max(0.0, self.ammo_flash - dt)
 
         # Board cleared this frame: drop a pickup as a reward
@@ -709,12 +730,47 @@ class Game:
             # Match the render slide-in offset so the ghost appears
             # where the brick was drawn, not at its logical position
             cy -= CELL_SIZE * (brick.spawn_t / SPAWN_ANIM_TIME)
+        hp = max(1, brick.hp + damage)  # color before the killing blow
         self.dying_bricks.append({
             "shape": brick.shape, "tri_dir": brick.tri_dir,
-            "cx": rect.centerx, "cy": cy,
-            "hp": max(1, brick.hp + damage),  # color before the killing blow
+            "cx": rect.centerx, "cy": cy, "hp": hp,
             "timer": DEATH_ANIM_TIME,
         })
+        self._spawn_shards(rect.centerx, cy, rect.width, rect.height, hp)
+
+    def _spawn_shards(self, cx: float, cy: float, w: float, h: float,
+                      hp: int):
+        """Burst of spinning triangles flying out from a killed brick."""
+        rng = _FX_RNG
+        for _ in range(rng.randint(*SHARD_COUNT)):
+            x = cx + rng.uniform(-w, w) * 0.35
+            y = cy + rng.uniform(-h, h) * 0.35
+            # Outward from the center, slight upward kick
+            ang = math.atan2(y - cy, x - cx) + rng.uniform(-0.6, 0.6)
+            speed = rng.uniform(*SHARD_SPEED)
+            life = rng.uniform(*SHARD_LIFE)
+            self.shards.append({
+                "x": x, "y": y,
+                "vx": math.cos(ang) * speed,
+                "vy": math.sin(ang) * speed - 80,
+                "rot": rng.uniform(0, math.tau),
+                "spin": rng.uniform(-12, 12),
+                "size": rng.uniform(4, 9), "hp": hp,
+                "life": life, "timer": life,
+            })
+        if len(self.shards) > SHARD_MAX:
+            del self.shards[:len(self.shards) - SHARD_MAX]
+
+    def _update_shards(self, dt: float):
+        drag = max(0.0, 1 - 1.8 * dt)
+        for s in self.shards:
+            s["timer"] -= dt
+            s["vx"] *= drag
+            s["vy"] = s["vy"] * drag + SHARD_GRAVITY * dt
+            s["x"] += s["vx"] * dt
+            s["y"] += s["vy"] * dt
+            s["rot"] += s["spin"] * dt
+        self.shards = [s for s in self.shards if s["timer"] > 0]
 
     def _in_tar(self, brick: Brick) -> bool:
         """True if the brick touches any tar zone."""
@@ -1349,6 +1405,7 @@ class Game:
                                         PROJECTILE_RADIUS * 2)
                 if expanded.collidepoint(bx, by):
                     brick.hp -= 1
+                    brick.hit_t = HIT_FLASH_TIME
                     if brick.shield > 0:
                         brick.shield -= 1  # fire chips armor as it passes
                     proj.border_hits = 0
@@ -1378,6 +1435,7 @@ class Game:
                     hit = self._collide_rect(proj, brick, off)
 
                 if hit:
+                    brick.hit_t = HIT_FLASH_TIME
                     if brick.shield > 0:
                         rect_c = cell_rect_full(brick.col, brick.row,
                                                 shape, off)
@@ -1699,6 +1757,7 @@ class Game:
             rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
             points.append(rect.center)
             b.hp -= damage
+            b.hit_t = HIT_FLASH_TIME
             b.stun = LIGHTNING_STUN
             if b.hp <= 0:
                 self._kill_brick(b, damage)
@@ -1792,6 +1851,7 @@ class Game:
             if math.hypot(cx - ex, cy - ey) < blast_px:
                 brick.shield //= 2  # blast cracks armor
                 brick.hp -= damage
+                brick.hit_t = HIT_FLASH_TIME
                 if brick.hp <= 0:
                     self._kill_brick(brick, damage)
                     to_remove.append(i)

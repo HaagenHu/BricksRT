@@ -12,6 +12,7 @@ from game import (
     BOMB_RADIUS_CELLS,
     ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
+    HIT_FLASH_TIME,
     Brick, Game, cell_rect,
 )
 
@@ -100,6 +101,77 @@ def _danger_gradient() -> pygame.Surface:
             pygame.draw.line(surf, (255, 40, 30, a), (0, yy), (WIDTH, yy))
         _danger_grad = surf
     return _danger_grad
+
+
+def _mix(a: tuple[int, int, int], b: tuple[int, int, int],
+         t: float) -> tuple[int, int, int]:
+    """Linear blend from color a (t=0) to color b (t=1)."""
+    return tuple(int(x + (y - x) * t) for x, y in zip(a, b))
+
+
+# Additive glow: radial-gradient sprites on black, blitted with
+# BLEND_ADD (black adds nothing). Built once and cached — never per
+# frame. Color, radius and strength are quantized so the cache stays
+# small even for animated effects and the endless HP color range.
+GLOW_LEVELS = 8
+_glow_cache: dict[tuple, pygame.Surface] = {}
+
+
+def _glow_sprite(color: tuple[int, int, int], radius: int,
+                 strength: float) -> pygame.Surface:
+    color = tuple(c // 16 * 16 for c in color)
+    radius = max(4, (radius + 3) // 4 * 4)
+    level = max(1, min(GLOW_LEVELS, round(strength * GLOW_LEVELS)))
+    key = (color, radius, level)
+    surf = _glow_cache.get(key)
+    if surf is None:
+        surf = pygame.Surface((radius * 2, radius * 2))
+        k = level / GLOW_LEVELS
+        for r in range(radius, 0, -1):
+            f = k * (1 - r / radius) ** 2
+            pygame.draw.circle(surf, [int(c * f) for c in color],
+                               (radius, radius), r)
+        _glow_cache[key] = surf
+    return surf
+
+
+def draw_glow(screen: pygame.Surface, color: tuple[int, int, int],
+              x: float, y: float, radius: float, strength: float = 1.0):
+    if strength <= 0:
+        return
+    surf = _glow_sprite(color, int(radius), strength)
+    r = surf.get_width() // 2
+    screen.blit(surf, (int(x) - r, int(y) - r),
+                special_flags=pygame.BLEND_ADD)
+
+
+# Brick halos: the brick's silhouette in a dimmed HP color, blurred,
+# with a margin for the glow to bleed into. Cached per shape + color.
+HALO_PAD = 10
+_halo_cache: dict[tuple, pygame.Surface] = {}
+
+
+def _brick_halo(shape: str, tri_dir: str,
+                color: tuple[int, int, int]) -> pygame.Surface:
+    color = tuple(c // 16 * 16 for c in color)
+    key = (shape, tri_dir, color)
+    surf = _halo_cache.get(key)
+    if surf is None:
+        body = cell_rect(0, 0, shape)
+        surf = pygame.Surface((body.width + HALO_PAD * 2,
+                               body.height + HALO_PAD * 2))
+        local = pygame.Rect(HALO_PAD, HALO_PAD, body.width, body.height)
+        dim = [int(c * 0.8) for c in color]
+        pts = shape_points(shape, tri_dir, *local.center, BRICK_SIZE / 2)
+        if shape == "round":
+            pygame.draw.circle(surf, dim, local.center, BRICK_SIZE // 2)
+        elif pts is not None:
+            pygame.draw.polygon(surf, dim, pts)
+        else:
+            pygame.draw.rect(surf, dim, local, border_radius=4)
+        surf = pygame.transform.gaussian_blur(surf, 6)
+        _halo_cache[key] = surf
+    return surf
 
 
 def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
@@ -220,6 +292,13 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         color = tuple(int(c * (1 - mix) + f * mix)
                       for c, f in zip(color, (235, 190, 255)))
 
+    # Hit flash: brief white pop on every damaging hit
+    if brick.hit_t > 0:
+        color = _mix(color, TEXT_COLOR, 0.75 * brick.hit_t / HIT_FLASH_TIME)
+
+    # Thin light edge keeps the face crisp against its own glow
+    rim = _mix(color, TEXT_COLOR, 0.45)
+
     frame_color = (FREEZE_COLOR if draw_ice_frame
                    else LIGHTNING_COLOR if draw_stun_frame
                    else TAR_COLOR if brick.slow_t > 0 and not reversing
@@ -231,15 +310,19 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         if frame_color:
             pygame.draw.circle(screen, frame_color, rect.center,
                                BRICK_SIZE // 2 + 2, 2)
+        else:
+            pygame.draw.circle(screen, rim, rect.center, BRICK_SIZE // 2, 1)
     elif pts is not None:  # diamond, hexagon, trapezoid, triangle
         pygame.draw.polygon(screen, color, pts)
-        if frame_color:
-            pygame.draw.polygon(screen, frame_color, pts, 2)
+        pygame.draw.polygon(screen, frame_color or rim, pts,
+                            2 if frame_color else 1)
     else:  # square, wide, tall
         pygame.draw.rect(screen, color, rect, border_radius=4)
         if frame_color:
             pygame.draw.rect(screen, frame_color, rect.inflate(4, 4),
                              2, border_radius=5)
+        else:
+            pygame.draw.rect(screen, rim, rect, 1, border_radius=4)
 
     # Shield (shape-aware)
     if brick.shield > 0:
@@ -296,11 +379,12 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
 
 
 def draw_dying_brick(screen: pygame.Surface, d: dict):
-    """Shrinking ghost of a killed brick."""
+    """Shrinking ghost of a killed brick — starts white-hot, cools to
+    its own color as it shrinks (the shards carry the rest)."""
     s = max(0.0, d["timer"] / DEATH_ANIM_TIME)
     if s <= 0:
         return
-    color = brick_color(d["hp"])
+    color = _mix(brick_color(d["hp"]), TEXT_COLOR, 0.7 * s)
     cx, cy = int(d["cx"]), int(d["cy"])
     h = (BRICK_SIZE / 2) * s
     shape = d["shape"]
@@ -341,11 +425,23 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     # Bricks (per-brick offset for wall blocking)
     danger_y = GRID_BOTTOM - CELL_SIZE
+    placed: list[tuple[Brick, float]] = []
     for brick in game.bricks:
         boff = game._brick_off(brick)
         # Spawn slide-in: start one cell up, behind the HUD (visual only)
         if brick.spawn_t > 0:
             boff -= CELL_SIZE * (brick.spawn_t / SPAWN_ANIM_TIME)
+        placed.append((brick, boff))
+
+    # Halos in their own pass first, so one brick's glow never washes
+    # over a neighbor's face — it only lights the gaps between them
+    for brick, boff in placed:
+        rect = cell_rect(brick.col, brick.row, brick.shape, boff)
+        halo = _brick_halo(brick.shape, brick.tri_dir, brick_color(brick.hp))
+        screen.blit(halo, halo.get_rect(center=rect.center),
+                    special_flags=pygame.BLEND_ADD)
+
+    for brick, boff in placed:
         bottom = (GRID_TOP + (brick.row + 1) * CELL_SIZE
                   + brick.extra_height + boff)
         danger = bottom >= danger_y
@@ -356,6 +452,18 @@ def draw_game(screen: pygame.Surface, game: Game,
     # Dying bricks (shrink out)
     for d in game.dying_bricks:
         draw_dying_brick(screen, d)
+
+    # Kill shards: spinning triangles that shrink and cool toward the bg
+    for s in game.shards:
+        f = s["timer"] / s["life"]
+        color = brick_color(s["hp"])
+        size = s["size"] * (0.4 + 0.6 * f)
+        pts = [(s["x"] + size * math.cos(s["rot"] + k * math.tau / 3),
+                s["y"] + size * math.sin(s["rot"] + k * math.tau / 3))
+               for k in range(3)]
+        draw_glow(screen, color, s["x"], s["y"], 10, 0.4 * f)
+        pygame.draw.polygon(screen, _mix(BG_COLOR, color, 0.35 + 0.65 * f),
+                            pts)
 
     # Sticky charges riding bricks: blinking mine dot
     for ch in game.sticky_charges:
@@ -371,11 +479,13 @@ def draw_game(screen: pygame.Surface, game: Game,
     # Field pickups
     for pu in game.pickups:
         rect = cell_rect(pu["col"], pu["row"], "square", off)
+        draw_glow(screen, PICKUP_STYLE[pu["type"]][0], *rect.center, 22, 0.5)
         draw_pickup_icon(screen, small_font, pu["type"], *rect.center)
 
     # Placed mines (stationary, waiting for brick contact)
     for mine in game.placed_mines:
         mx, my = int(mine["x"]), int(mine["y"])
+        draw_glow(screen, (255, 70, 70), mx, my, 20, 0.45)
         pygame.draw.circle(screen, MINE_COLOR, (mx, my), 10)
         pygame.draw.circle(screen, (255, 100, 100), (mx, my), 10, 2)
         pygame.draw.line(screen, (200, 40, 40),
@@ -420,6 +530,12 @@ def draw_game(screen: pygame.Surface, game: Game,
         screen.blit(wt_txt, (4, wy + 4))
 
     # Placed AoE pickups (stationary icons)
+    for items, gcolor in ((game.placed_freezes, FREEZE_COLOR),
+                          (game.placed_reverses, REVERSE_COLOR),
+                          (game.placed_lightnings, LIGHTNING_COLOR),
+                          (game.placed_skulls, SKULL_COLOR)):
+        for it in items:
+            draw_glow(screen, gcolor, it["x"], it["y"], 20, 0.5)
     for fz in game.placed_freezes:
         draw_freeze_icon(screen, int(fz["x"]), int(fz["y"]))
     for rv in game.placed_reverses:
@@ -433,6 +549,8 @@ def draw_game(screen: pygame.Surface, game: Game,
     for bolt in game.lightning_bolts:
         pts = [(int(x), int(y)) for x, y in bolt["points"]]
         if len(pts) >= 2:
+            for gx, gy in pts[::2]:
+                draw_glow(screen, LIGHTNING_COLOR, gx, gy, 16, 0.4)
             pygame.draw.lines(screen, LIGHTNING_COLOR, False, pts, 3)
             pygame.draw.lines(screen, TEXT_COLOR, False, pts, 1)
 
@@ -473,6 +591,25 @@ def draw_game(screen: pygame.Surface, game: Game,
                 pcolor = MORTAR_WALL_COLOR
             else:
                 pcolor = TEXT_COLOR
+            # Trail: a tapering streak cooling toward the bg (segments
+            # plus round joints); glow on every other point keeps the
+            # blit count down in big volleys
+            pts = list(p.trail) + [(p.pos.x, p.pos.y)]
+            n = len(p.trail)
+            for i in range(n):
+                f = (i + 1) / (n + 1)
+                (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+                if i % 2 == n % 2:
+                    draw_glow(screen, pcolor, x1, y1,
+                              PROJECTILE_RADIUS * 3, 0.5 * f)
+                tcolor = _mix(BG_COLOR, pcolor, 0.75 * f)
+                w = max(1, int(PROJECTILE_RADIUS * 1.6 * f))
+                pygame.draw.line(screen, tcolor, (int(x1), int(y1)),
+                                 (int(x2), int(y2)), w)
+                pygame.draw.circle(screen, tcolor, (int(x1), int(y1)),
+                                   max(1, w // 2))
+            draw_glow(screen, pcolor, p.pos.x, p.pos.y,
+                      PROJECTILE_RADIUS * 4, 0.8)
             pygame.draw.circle(screen, pcolor,
                                (int(p.pos.x), int(p.pos.y)),
                                PROJECTILE_RADIUS)
@@ -487,6 +624,7 @@ def draw_game(screen: pygame.Surface, game: Game,
         arc_height = min(150, math.hypot(tx - sx, ty - sy) * 0.4)
         y = sy + (ty - sy) * t - arc_height * math.sin(t * math.pi)
         sc = AMMO_STYLE.get(shell["type"], (TEXT_COLOR, "?"))[0]
+        draw_glow(screen, sc, x, y, 20, 0.8)
         pygame.draw.circle(screen, sc, (int(x), int(y)), 6)
         # Trail
         if t > 0.05:
@@ -505,12 +643,15 @@ def draw_game(screen: pygame.Surface, game: Game,
         pygame.draw.circle(surf, (255, 150, 50, alpha),
                            (radius, radius), radius)
         screen.blit(surf, (int(e["x"]) - radius, int(e["y"]) - radius))
+        draw_glow(screen, (255, 170, 80), e["x"], e["y"],
+                  radius * 1.5, alpha / 255)
 
     screen.set_clip(None)
 
     # --- Gun position + aim line ---
     gx = int(game.gun_x)
     gy = GRID_BOTTOM
+    draw_glow(screen, AMMO_COLOR, gx, gy, 24, 0.5)
     pygame.draw.circle(screen, AMMO_COLOR, (gx, gy), 8)
     if game.phase in ("playing", "paused"):
         ax = gx + math.cos(game.aim_angle) * GUN_BARREL_LEN
@@ -521,6 +662,7 @@ def draw_game(screen: pygame.Surface, game: Game,
     if game.phase == "playing":
         mx, my = game.crosshair
         size = 12
+        draw_glow(screen, CROSSHAIR_COLOR, mx, my, 24, 0.35)
         pygame.draw.line(screen, CROSSHAIR_OUTLINE,
                          (mx - size, my), (mx + size, my), 5)
         pygame.draw.line(screen, CROSSHAIR_OUTLINE,

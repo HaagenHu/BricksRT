@@ -227,14 +227,15 @@ Implementation notes:
 
 Juice over art assets — ranked by impact per effort:
 
-1. Hit flash + kill particles: brick flashes white ~50ms on hit; on
-   death bursts into 8-12 shards of its own color (particle list like
-   `explosions`)
-2. Projectile trails: last ~8 positions as shrinking, fading circles —
-   makes ricochet paths readable (core mechanic!)
+1. Hit flash + kill particles — **implemented**: brick flashes white
+   60ms on hit; on death it pops white and bursts into 8-12 spinning
+   shards of its own color (`Game.shards`, own RNG)
+2. Projectile trails — **implemented**: last 8 positions as a tapering,
+   fading streak — makes ricochet paths readable (core mechanic!)
 3. Screen shake: decaying random offset on bomb/wall break/skull
-4. Additive glow: `BLEND_ADD` over pre-rendered radial-gradient
-   sprites for projectiles/explosions/waves — neon look on dark bg
+4. Additive glow — **implemented**: `BLEND_ADD` over cached
+   radial-gradient sprites for projectiles/shells/explosions/pickups;
+   bricks get a blurred HP-color halo pass plus a light rim
 5. Brick depth + damage states: dark bottom-right edge, light top
    edge; cracks below ~30% of spawn HP (needs `max_hp` on Brick)
 6. Spawn/death animation — **implemented**: rows slide down from

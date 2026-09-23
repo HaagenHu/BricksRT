@@ -369,6 +369,39 @@ def test_spawn_and_death_animations():
     assert not gm.dying_bricks
 
 
+def test_hit_flash_shards_and_trail():
+    gm = _fresh_game(wave=1)
+    # A surviving hit flashes the brick; the flash decays away
+    gm.bricks = [Brick(col=3, row=4, hp=5)]
+    b = gm.bricks[0]
+    rect = g.cell_rect_full(3, 4, "square", gm._brick_off(b))
+    p = Projectile((rect.centerx, rect.top), (0, g.PROJECTILE_SPEED))
+    gm._collide_bricks(p)
+    assert b.hp == 4 and b.hit_t == g.HIT_FLASH_TIME
+    for _ in range(6):  # > HIT_FLASH_TIME
+        gm.update(1 / 60)
+    assert b.hit_t == 0.0
+
+    # A kill bursts into shards that fall and expire
+    gm.shards.clear()
+    state = random.getstate()
+    gm._kill_brick(b)
+    assert random.getstate() == state  # effects don't touch gameplay RNG
+    lo, hi = g.SHARD_COUNT
+    assert lo <= len(gm.shards) <= hi
+    gm.bricks = []
+    for _ in range(int(g.SHARD_LIFE[1] * 60) + 2):
+        gm.update(1 / 60)
+    assert not gm.shards
+
+    # Projectiles remember their last TRAIL_LEN positions, oldest first
+    p = Projectile((100, 300), (0, -60))
+    for _ in range(g.TRAIL_LEN + 3):
+        p.update(1 / 60)
+    assert len(p.trail) == g.TRAIL_LEN
+    assert p.trail[0][1] > p.trail[-1][1]  # moving up: older = lower
+
+
 def test_tar_slows_bricks_in_zone():
     gm = _fresh_game(wave=6)
     gm.bricks = [
