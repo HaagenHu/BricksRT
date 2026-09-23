@@ -404,13 +404,6 @@ def test_hit_flash_shards_and_trail():
 
 def test_explosion_fx_and_shake():
     gm = _fresh_game(wave=10)
-    # Bricks remember their starting HP (for cracks); visual-only
-    # fields stay out of equality
-    b = Brick(col=1, row=2, hp=9)
-    assert b.max_hp == 9 and 0 <= b.crack_seed < g.CRACK_PATTERNS
-    assert Brick(col=1, row=2, hp=9, crack_seed=1) == \
-        Brick(col=1, row=2, hp=9, crack_seed=2)
-
     # A blast throws sparks + smoke and shakes the screen, all of which
     # drain away; effects never draw from the gameplay RNG
     gm.bricks = []

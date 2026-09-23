@@ -269,49 +269,6 @@ def _bevel_circle(screen: pygame.Surface, center, radius: int, color):
     pygame.draw.arc(screen, lo, box, 5 * math.pi / 4, 9 * math.pi / 4, 2)
 
 
-# Damage cracks: each layout is 5 jagged polylines in unit space (half
-# size 1) radiating from near the center. Stage 1 (<60% hp) draws the
-# first 2, stage 2 (<30%) all 5. Built once per layout.
-_crack_cache: dict[int, list[list[tuple[float, float]]]] = {}
-CRACK_REACH = {"diamond": 0.6, "triangle": 0.45, "trapezoid": 0.75}
-
-
-def _crack_layout(seed: int) -> list[list[tuple[float, float]]]:
-    lines = _crack_cache.get(seed)
-    if lines is None:
-        rng = random.Random(seed)
-        lines = []
-        base = rng.uniform(0, math.tau)
-        for i in range(5):
-            ang = base + i * math.tau / 5 + rng.uniform(-0.4, 0.4)
-            x, y = rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12)
-            pts = [(x, y)]
-            for _ in range(3):
-                ang += rng.uniform(-0.6, 0.6)
-                step = rng.uniform(0.22, 0.32)
-                x += math.cos(ang) * step
-                y += math.sin(ang) * step
-                pts.append((x, y))
-            lines.append(pts)
-        _crack_cache[seed] = lines
-    return lines
-
-
-def _draw_cracks(screen: pygame.Surface, brick: Brick, rect: pygame.Rect,
-                 color):
-    frac = brick.hp / brick.max_hp if brick.max_hp > 0 else 1.0
-    if frac > 0.6:
-        return
-    count = 2 if frac > 0.3 else 5
-    scale = min(rect.width, rect.height) / 2 * CRACK_REACH.get(brick.shape,
-                                                               0.85)
-    cx, cy = rect.center
-    dark = _mix(color, (0, 0, 0), 0.55)
-    for line in _crack_layout(brick.crack_seed)[:count]:
-        pts = [(cx + x * scale, cy + y * scale) for x, y in line]
-        pygame.draw.lines(screen, dark, False, pts, 2)
-
-
 def draw_pickup_icon(screen: pygame.Surface, font: pygame.font.Font,
                      ptype: str, cx: int, cy: int):
     color, label, rfactor = PICKUP_STYLE[ptype]
@@ -458,8 +415,6 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         if frame_color:
             pygame.draw.rect(screen, frame_color, rect.inflate(4, 4),
                              2, border_radius=5)
-
-    _draw_cracks(screen, brick, rect, color)
 
     # Shield (shape-aware)
     if brick.shield > 0:

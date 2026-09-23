@@ -5,7 +5,7 @@ import math
 import os
 import random
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pygame
 
@@ -95,7 +95,6 @@ SHAKE_BOMB = 0.3
 SHAKE_WALL_BREAK = 0.45
 SHAKE_SKULL = 0.7
 SHAKE_DECAY = 1.8          # trauma drained per second
-CRACK_PATTERNS = 64        # distinct crack layouts bricks draw from
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -209,16 +208,6 @@ class Brick:
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
     acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
     acid_tick: float = 0.0  # DoT accumulator toward the next damage
-    # Visual only: HP at creation (cracks show damage against it) and a
-    # crack layout id; excluded from equality like an identity would be
-    max_hp: int = field(default=0, compare=False)
-    crack_seed: int = field(default=-1, compare=False)
-
-    def __post_init__(self):
-        if self.max_hp <= 0:
-            self.max_hp = self.hp
-        if self.crack_seed < 0:
-            self.crack_seed = _FX_RNG.randrange(CRACK_PATTERNS)
 
     def cells(self) -> list[tuple[int, int]]:
         """Grid cells occupied by this brick."""

@@ -238,9 +238,8 @@ Juice over art assets — ranked by impact per effort:
 4. Additive glow — **implemented**: `BLEND_ADD` over cached
    radial-gradient sprites for projectiles/shells/explosions/pickups;
    bricks get a blurred HP-color halo pass plus a light rim
-5. Brick depth + damage states — **implemented**: bevel lit from the
-   top-left on every shape; cracks at <60% and <30% of `max_hp` (one
-   of 64 cached layouts per brick)
+5. Brick depth — **implemented**: bevel lit from the top-left on every
+   shape. Damage cracks were tried and dropped (looked noisy)
 8. Layered explosions — **implemented**: white-hot core, fading glow,
    shockwave ring, spark streaks and smoke puffs
 9. Mortar landing reticle — **implemented**: the round's footprint at

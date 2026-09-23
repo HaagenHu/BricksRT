@@ -17,9 +17,7 @@
   own RNG, so gameplay randomness is untouched)
 - **Screen shake** on blasts, wall breaks (with sparks along the line)
   and skulls; only the field moves — HUD, gun and crosshair stay still
-- **Brick depth + cracks**: every shape is beveled (lit from the
-  top-left); bricks crack below 60% and again below 30% of their
-  starting HP (new `Brick.max_hp`)
+- **Brick depth**: every shape is beveled (lit from the top-left)
 - **Layered explosions**: white-hot core, fading glow, shockwave ring,
   spark streaks and drifting smoke
 - **Mortar reticle**: in-flight rounds mark their footprint at the
