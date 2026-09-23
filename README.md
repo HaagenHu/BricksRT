@@ -2,6 +2,8 @@
 
 Real-time brick breaker with gun and mortar mechanics. Based on [Bricks](https://github.com/HaagenHu/Bricks).
 
+![Gameplay and menu](docs/screenshot.png)
+
 ## Concept
 
 Bricks advance slowly in real-time. Player has a crosshair and two weapons:
@@ -11,6 +13,25 @@ Bricks advance slowly in real-time. Player has a crosshair and two weapons:
   Tar (select type with scroll wheel or 1-5)
 - **AoE (Pickup):** Field effects — Freeze, Reverse, Lightning, Skull
 
+## Graphics
+
+Neon-vector look, all drawn in code — no image assets:
+
+- **Glow:** additive glow on shots, shells, blasts, pickups, gun and
+  crosshair; bricks get a halo in their HP color and a bevel
+- **Motion:** shots leave fading trails; bricks flash on hits and shatter
+  into shards on kills; blasts, wall breaks and skulls shake the field
+- **Explosions:** white-hot core, shockwave ring, sparks and smoke
+- **Zones:** bubbling acid, glossy tar, honeycomb energy walls, frost
+  while frozen
+- **Readability:** mortar rounds mark their landing footprint; bricks
+  about to reach the death line flash white with a red glow
+- **Gun and HUD:** recoiling turret tinted by the loaded ammo, a mortar
+  reload ring on the crosshair, gradient HUD panels, nebula backdrop
+- **Menu:** glowing title over falling, shattering demo bricks
+
+See [CHANGELOG.md](CHANGELOG.md) (v0.5.0) for details.
+
 ## Status
 
 Work in progress. Branched from the turn-based Bricks game.
@@ -19,6 +40,7 @@ Work in progress. Branched from the turn-based Bricks game.
 
 - Python 3.10+
 - pygame-ce (`pip install pygame-ce`)
+- UI font: Bahnschrift (ships with Windows 10+); falls back to Arial
 
 ## Run
 
