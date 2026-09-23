@@ -505,9 +505,19 @@ def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
     return None
 
 
+DANGER_RED = (255, 50, 40)
+DANGER_PULSE_SPEED = 14.0  # rad/s (~2.2 Hz). Fixed: ramping the rate
+                           # with proximity would jump the phase
+
+
+def danger_pulse_at(time: float) -> float:
+    """0..1 pulse shared by every endangered brick (flash in sync)."""
+    return 0.5 + 0.5 * math.sin(time * DANGER_PULSE_SPEED)
+
+
 def draw_brick(screen: pygame.Surface, brick: Brick,
                font: pygame.font.Font, y_offset: float = 0,
-               danger: bool = False, time: float = 0.0,
+               danger: float | None = None, time: float = 0.0,
                frozen: bool = False, in_acid: bool = False,
                reversing: bool = False, stunned: bool = False):
     shape = brick.shape
@@ -532,13 +542,16 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
         b = int(color[2] * (1 - mix))
         color = (min(255, r), min(255, g), min(255, b))
 
-    # Danger flash: pulse between normal color and red
-    if danger and not frozen:
-        pulse = 0.5 + 0.5 * math.sin(time * 10)
-        r = min(255, int(color[0] + (255 - color[0]) * pulse))
-        g = int(color[1] * (1 - pulse * 0.7))
-        b = int(color[2] * (1 - pulse * 0.7))
-        color = (r, g, b)
+    # Danger flash (last row before the death line; danger = 0 entering
+    # it, 1 at the line): pulse toward white — reads on every hue, the
+    # red high-HP bricks included — harder the closer it gets. Red
+    # outline below, red glow in the halo pass.
+    danger_pulse = None
+    if danger is not None and not frozen:
+        danger_pulse = danger_pulse_at(time)
+        # Capped at 55% white so the white HP number stays readable
+        color = _mix(color, TEXT_COLOR,
+                     (0.3 + 0.25 * danger) * danger_pulse)
 
     # Skull sweep: bright purple-white flash fading out
     if brick.flash > 0:
@@ -554,6 +567,8 @@ def draw_brick(screen: pygame.Surface, brick: Brick,
                    else LIGHTNING_COLOR if draw_stun_frame
                    else TAR_COLOR if brick.slow_t > 0 and not reversing
                    else REVERSE_COLOR if draw_reverse_frame else None)
+    if frame_color is None and danger_pulse is not None:
+        frame_color = _mix(BG_COLOR, DANGER_RED, 0.45 + 0.55 * danger_pulse)
 
     pts = shape_points(shape, brick.tri_dir, *rect.center, BRICK_SIZE / 2)
     if shape == "round":
@@ -668,6 +683,16 @@ def draw_dying_brick(screen: pygame.Surface, d: dict):
         pygame.draw.rect(screen, color, rect, border_radius=3)
 
 
+def _brick_danger(brick: Brick, boff: float, danger_y: int) -> float | None:
+    """None outside the last row; else 0 (just entered) .. 1 (at the
+    death line) by how far the brick's bottom has crossed into it."""
+    bottom = (GRID_TOP + (brick.row + 1) * CELL_SIZE
+              + brick.extra_height + boff)
+    if bottom < danger_y:
+        return None
+    return min(1.0, (bottom - danger_y) / CELL_SIZE)
+
+
 def draw_shards(screen: pygame.Surface, shards: list[dict]):
     """Kill shards: spinning triangles that shrink and cool toward the bg."""
     for s in shards:
@@ -728,11 +753,14 @@ def draw_game(screen: pygame.Surface, game: Game,
         halo = _brick_halo(brick.shape, brick.tri_dir, brick_color(brick.hp))
         screen.blit(halo, halo.get_rect(center=rect.center),
                     special_flags=pygame.BLEND_ADD)
+        danger = _brick_danger(brick, boff, danger_y)
+        if danger is not None and game.freeze_timer <= 0:
+            # Pulsing red warning glow, stronger nearer the death line
+            draw_glow(screen, DANGER_RED, *rect.center, BRICK_SIZE * 0.9,
+                      (0.35 + 0.5 * danger) * danger_pulse_at(game.game_time))
 
     for brick, boff in placed:
-        bottom = (GRID_TOP + (brick.row + 1) * CELL_SIZE
-                  + brick.extra_height + boff)
-        danger = bottom >= danger_y
+        danger = _brick_danger(brick, boff, danger_y)
         draw_brick(screen, brick, small_font, boff, danger, game.game_time,
                    game.freeze_timer > 0, brick.acid_t > 0,
                    game.reverse_timer > 0, brick.stun > 0)
