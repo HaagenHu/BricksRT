@@ -107,6 +107,8 @@ SHAKE_DECAY = 1.8          # trauma drained per second
 GUN_KICK_TIME = 0.1        # barrel recoil + muzzle flash per trigger
                            # (under GUN_COOLDOWN, so held fire pulses)
 EVENT_MAX = 64             # queued frontend cues kept if nobody drains
+SHIELD_HIT_TIME = 0.15     # shield flash after it absorbs damage
+SHIELD_SPARK_COLOR = (0, 220, 255)
 
 BOMB_RADIUS_CELLS = 1.5
 
@@ -219,6 +221,8 @@ class Brick:
     hit_t: float = 0.0   # hit flash remaining (visual only)
     zap_t: float = 0.0   # lightning-stun crackle remaining (visual only;
                          # wall bullets also stun, but don't crackle)
+    shield_hit_t: float = 0.0  # shield flash after absorbing (visual only)
+    shield_prev: int = -1      # last frame's shield, to spot any loss
     slow_pct: float = 0.0  # tar-bullet slow, 0..1 (0.15 per hit)
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
     acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
@@ -779,6 +783,13 @@ class Game:
                 b.hit_t = max(0.0, b.hit_t - dt)
             if b.zap_t > 0:
                 b.zap_t = max(0.0, b.zap_t - dt)
+            if b.shield_hit_t > 0:
+                b.shield_hit_t = max(0.0, b.shield_hit_t - dt)
+            # One check covers every way a shield wears down (hits from
+            # below, fire bullets, acid, blasts, skull)
+            if b.shield < b.shield_prev:
+                self._shield_struck(b)
+            b.shield_prev = b.shield
         self.lightning_flash = max(0.0, self.lightning_flash - dt)
         self.ammo_flash = max(0.0, self.ammo_flash - dt)
 
@@ -870,6 +881,20 @@ class Game:
             })
         if len(self.smoke) > PARTICLE_MAX:
             del self.smoke[:len(self.smoke) - PARTICLE_MAX]
+
+    def _shield_struck(self, b: Brick):
+        """Shield absorbed damage: flash + a few sparks; if it's gone, a
+        burst along the whole bottom edge and a cue."""
+        b.shield_hit_t = SHIELD_HIT_TIME
+        rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+        if b.shield > 0:
+            self._spawn_sparks(rect.centerx, rect.bottom, 3,
+                               SHIELD_SPARK_COLOR)
+            return
+        for i in range(5):
+            self._spawn_sparks(rect.left + rect.width * (i + 0.5) / 5,
+                               rect.bottom, 3, SHIELD_SPARK_COLOR)
+        self._emit("shield_break")
 
     def _emit(self, name: str):
         """Queue a cue for the frontend. Capped, so a game driven without

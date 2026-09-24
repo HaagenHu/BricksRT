@@ -13,7 +13,7 @@ from game import (
     ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
     HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN, COLS, MAX_ROWS,
-    LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME,
+    LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME, SHIELD_HIT_TIME,
     Brick, Game, cell_rect, make_shards, step_shards,
 )
 
@@ -464,6 +464,88 @@ def draw_bolt(screen: pygame.Surface, bolt: dict, time: float):
         draw_glow(screen, TEXT_COLOR, nx, ny, 24, 0.4 * power)
 
 
+# Shields: an energy band along the brick's downward-facing edges (the
+# side they block). Thickness and glow scale with strength, a glint
+# glides along it, and it flashes white when it absorbs a hit.
+SHIELD_GAP = 3        # px the band floats outside the brick's edge
+SHIELD_GLINT_HZ = 0.6  # glint passes per second
+SHIELD_LAYERED = 0.78  # strength above which a second band shows (7+)
+
+
+def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
+                 gap: float = SHIELD_GAP) -> list[tuple[float, float]]:
+    """Polyline of the downward-facing edges, pushed `gap` px out."""
+    cx, cy = rect.center
+    h = BRICK_SIZE / 2 + gap
+    if shape == "round":  # lower arc, screen angles 0.3 .. pi-0.3
+        return [(cx + h * math.cos(a), cy + h * math.sin(a))
+                for a in (0.3 + (math.pi - 0.6) * k / 12 for k in range(13))]
+    if shape == "diamond":
+        return [(cx - h, cy), (cx, cy + h), (cx + h, cy)]
+    if shape == "hexagon":  # the three lower vertices
+        return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
+                 cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
+                for i in range(3)]
+    if shape == "triangle":
+        if tri_dir == "up":
+            return [(cx - h, cy + h), (cx + h, cy + h)]
+        if tri_dir == "down":
+            return [(cx - h / 2, cy), (cx, cy + h), (cx + h / 2, cy)]
+        if tri_dir == "left":  # bottom slant: apex to bottom-right
+            return [(cx - h, cy), (cx + h, cy + h)]
+        return [(cx - h, cy + h), (cx + h, cy)]
+    if shape == "trapezoid":
+        return [(cx - h, cy + h), (cx + h, cy + h)]
+    # square / wide / tall: bottom edge cupped up around the corners
+    left, right, bottom = rect.left - gap, rect.right + gap, rect.bottom + gap
+    return [(left, bottom - 9), (left + 2, bottom - 2), (left + 8, bottom),
+            (right - 8, bottom), (right - 2, bottom - 2), (right, bottom - 9)]
+
+
+def _along(pts: list[tuple[float, float]],
+           frac: float) -> tuple[float, float]:
+    """Point at fraction 0..1 of a polyline's length."""
+    segs = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])]
+    target = frac * sum(segs)
+    for (a, b), s in zip(zip(pts, pts[1:]), segs):
+        if target <= s and s > 0:
+            t = target / s
+            return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+        target -= s
+    return pts[-1]
+
+
+def _draw_shield(screen: pygame.Surface, brick: Brick, rect: pygame.Rect,
+                 time: float):
+    edge = _shield_edge(brick.shape, brick.tri_dir, rect)
+    pts = [(int(x), int(y)) for x, y in edge]
+    seed = (brick.col * 7 + brick.row * 13) * 0.37
+    # Strength 1 -> ~0.45, 20+ -> 1 (log): a worn shield visibly thins
+    strength = min(1.0, 0.35 + 0.65 * math.log1p(brick.shield) / math.log(21))
+    hit = brick.shield_hit_t / SHIELD_HIT_TIME if SHIELD_HIT_TIME else 0.0
+    breathe = 0.85 + 0.15 * math.sin(time * 3 + seed)
+    power = strength * breathe
+
+    for k in range(5):  # soft glow under the band
+        gx, gy = _along(edge, (k + 0.5) / 5)
+        draw_glow(screen, SHIELD_COLOR, gx, gy, 14, 0.3 * power + 0.5 * hit)
+    width = 1 + round(3 * strength)  # 2px worn .. 4px full
+    outer = _mix(BG_COLOR, SHIELD_COLOR, 0.5 * power + 0.3 * hit)
+    if strength > SHIELD_LAYERED:  # strong: a faint second band outside
+        echo = [(int(x), int(y)) for x, y in
+                _shield_edge(brick.shape, brick.tri_dir, rect, SHIELD_GAP + 5)]
+        pygame.draw.lines(screen, _mix(BG_COLOR, SHIELD_COLOR, 0.55 * power),
+                          False, echo, 1)
+    body = _mix(SHIELD_COLOR, TEXT_COLOR, 0.8 * hit)
+    core = _mix(SHIELD_COLOR, TEXT_COLOR, 0.55 + 0.45 * hit)
+    pygame.draw.lines(screen, outer, False, pts, width + 3)
+    pygame.draw.lines(screen, body, False, pts, width + 1)
+    pygame.draw.lines(screen, core, False, pts, 1)
+    # Glint gliding along the band, out of phase brick to brick
+    gx, gy = _along(edge, (time * SHIELD_GLINT_HZ + seed) % 1.0)
+    draw_glow(screen, TEXT_COLOR, gx, gy, 9, 0.7 * power)
+
+
 def _draw_crackle(screen: pygame.Surface, rect: pygame.Rect, brick: Brick,
                   time: float):
     """Lightning-stunned brick: two short arcs crawling around its edge,
@@ -708,54 +790,8 @@ def draw_brick(screen: pygame.Surface, brick: Brick, y_offset: float = 0,
             pygame.draw.rect(screen, frame_color, rect.inflate(4, 4),
                              2, border_radius=5)
 
-    # Shield (shape-aware)
     if brick.shield > 0:
-        cx, cy = rect.center
-        if shape == "round":
-            r = BRICK_SIZE // 2 + 2
-            arc_rect = pygame.Rect(cx - r, cy - r, r * 2, r * 2)
-            pygame.draw.arc(screen, SHIELD_COLOR, arc_rect,
-                            math.pi + 0.3, 2 * math.pi - 0.3, 3)
-        elif shape == "diamond":
-            half = BRICK_SIZE // 2 + 2
-            pygame.draw.lines(screen, SHIELD_COLOR, False, [
-                (cx - half, cy), (cx, cy + half), (cx + half, cy)], 3)
-        elif shape == "triangle":
-            h = BRICK_SIZE // 2 + 2
-            d = brick.tri_dir
-            if d == "up":
-                pygame.draw.line(screen, SHIELD_COLOR,
-                                 (cx - h, cy + h), (cx + h, cy + h), 3)
-            elif d == "down":
-                pygame.draw.lines(screen, SHIELD_COLOR, False, [
-                    (cx - h // 2, cy), (cx, cy + h), (cx + h // 2, cy)], 3)
-            elif d == "left":
-                # Bottom slant: apex (left) to bottom-right corner
-                pygame.draw.line(screen, SHIELD_COLOR,
-                                 (cx - h, cy), (cx + h, cy + h), 3)
-            else:
-                # Bottom slant: bottom-left corner to apex (right)
-                pygame.draw.line(screen, SHIELD_COLOR,
-                                 (cx - h, cy + h), (cx + h, cy), 3)
-        elif shape == "hexagon":
-            r = BRICK_SIZE / 2 + 2
-            # Bottom three vertices (screen y grows downward)
-            pts = [(int(cx + r * math.cos(math.pi / 6 + i * math.pi / 3)),
-                    int(cy + r * math.sin(math.pi / 6 + i * math.pi / 3)))
-                   for i in range(3)]
-            pygame.draw.lines(screen, SHIELD_COLOR, False, pts, 3)
-        elif shape == "trapezoid":
-            hw = BRICK_SIZE // 2 + 2
-            hh = BRICK_SIZE // 2 + 2
-            pygame.draw.line(screen, SHIELD_COLOR,
-                             (cx - hw, cy + hh), (cx + hw, cy + hh), 3)
-        else:
-            pygame.draw.line(screen, SHIELD_COLOR,
-                             (rect.left, rect.bottom),
-                             (rect.right, rect.bottom), 3)
-            glow_surf = pygame.Surface((rect.width, 6), pygame.SRCALPHA)
-            glow_surf.fill((*SHIELD_COLOR, 60))
-            screen.blit(glow_surf, (rect.left, rect.bottom - 3))
+        _draw_shield(screen, brick, rect, time)
 
     if brick.zap_t > 0 and not frozen:
         _draw_crackle(screen, rect, brick, time)

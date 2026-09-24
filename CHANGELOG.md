@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Shields**: an energy band floating just outside the brick's
+  downward-facing edges (cupped around the corners on square bricks):
+  layered glow, gentle pulse and a glint gliding along it. Thickness
+  and glow scale with strength, with a second faint band at 7+, so
+  wear is visible. Absorbing damage flashes it white with a few cyan
+  sparks; breaking throws sparks along the whole edge and plays a new
+  glassy shatter cue
 - **Balance — reload feeder**: returned balls still wait 1s, then
   reload one at a time at up to 10/s (was: every ball back in the
   same second released together). Big pools become a burst reserve —

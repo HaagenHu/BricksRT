@@ -125,6 +125,10 @@ def _build_all(rate: int) -> dict[str, list[list[float]]]:
     # Wall break: crunch + falling saw
     cues["wall_break"] = [M((0, N(0.3, 0.1, 0.15), 0.9),
                                (0, T(0.35, 420, 90, 0.15, "saw"), 0.45))]
+    # Shield break: glassy shatter — two bright falling tones + a hiss
+    cues["shield_break"] = [M((0, T(0.22, 2600, 2100, 0.07), 0.4),
+                              (0.015, T(0.2, 3400, 2800, 0.06), 0.35),
+                              (0, N(0.12, 0.04, 0.9), 0.3))]
     # Pickup: bright two-note blip
     cues["pickup"] = [M((0, T(0.08, 880, 880, 0.05), 0.6),
                            (0.07, T(0.1, 1320, 1320, 0.06), 0.6))]

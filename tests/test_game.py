@@ -460,7 +460,8 @@ def test_sound_player():
         # Every cue the game emits has a sound
         cues = ("kill", "explode", "mortar_launch", "mine_set", "acid",
                 "tar", "wall_up", "wall_break", "pickup", "freeze",
-                "reverse", "lightning", "skull", "gameover", "new_best")
+                "reverse", "lightning", "skull", "gameover", "new_best",
+                "shield_break")
         for cue in cues:
             assert sfx.cues[cue], cue
             assert all(s.get_length() > 0 for s in sfx.cues[cue])
@@ -478,6 +479,29 @@ def test_sound_player():
         sfx.play_events(["unknown_cue"], now=12.0)  # ignored, no crash
     finally:
         pygame.mixer.quit()
+
+
+def test_shield_flash_and_break():
+    gm = _fresh_game(wave=60)
+    b = Brick(col=3, row=4, hp=50, shield=2)
+    gm.bricks, gm.pickups = [b], []
+    gm.update(1 / 60)  # first frame just records the shield
+    assert b.shield_hit_t == 0.0
+    gm.drain_events()
+
+    b.shield -= 1  # any source: absorbed one hit
+    gm.update(1 / 60)
+    assert b.shield_hit_t > 0 and "shield_break" not in gm.drain_events()
+    sparks = len(gm.sparks)
+
+    b.shield = 0  # worn through
+    gm.update(1 / 60)
+    assert "shield_break" in gm.drain_events()
+    assert len(gm.sparks) > sparks  # burst along the edge
+    for _ in range(30):
+        gm.update(1 / 60)
+    assert b.shield_hit_t == 0.0
+    assert "shield_break" not in gm.drain_events()  # breaks only once
 
 
 def test_reload_feeder_caps_rate():
