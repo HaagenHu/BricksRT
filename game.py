@@ -127,7 +127,9 @@ GUN_LOAD_SHOTS = 5      # special bullets per ammo unit loaded (R key)
 TARSHOT_SLOW = 0.15     # slow added per tar-bullet hit (stacks to 1.0)
 TARSHOT_TIME = 3.0      # slow lasts this long after the LAST hit
 ACIDSHOT_DOT = 3.0      # seconds of burn after an acid-bullet hit
-ACIDSHOT_DPS = 2.0      # burn damage per second (1 per tick, shield first)
+ACIDSHOT_TICK = 1.0     # seconds between burn ticks
+ACIDSHOT_TICK_DMG = 2   # hp per burn tick (shield first) -> 2 dps
+ACID_POOL_DIV = 15      # acid pool deals max(1, wave // this) per tick
 ACID_SHIELD_MULT = 2    # acid (burn and pool) hits shields this much harder
                         # than hp; a tick that finishes a shield doesn't
                         # spill onto hp
@@ -774,22 +776,24 @@ class Game:
         # Acid zones: tick damage on nearby bricks
         self._update_acids(dt)
 
-        # Acid-bullet burn: 1 dmg per tick, ACIDSHOT_DPS ticks a second
-        tick = 1.0 / ACIDSHOT_DPS
+        # Acid-bullet burn: ACIDSHOT_TICK_DMG every ACIDSHOT_TICK seconds.
+        # The epsilon keeps the last tick from slipping past the burn's
+        # end on float drift (3s of 1/60 steps sums to 2.9999...)
         dissolved: list[Brick] = []
         for b in self.bricks:
             if b.acid_dot > 0:
                 b.acid_dot = max(0.0, b.acid_dot - dt)
                 b.acid_tick += dt
-                while b.acid_tick >= tick:
-                    b.acid_tick -= tick
+                while b.acid_tick >= ACIDSHOT_TICK - 1e-9:
+                    b.acid_tick -= ACIDSHOT_TICK
                     if b.shield > 0:
                         # Melts armor before flesh, and faster
-                        b.shield = max(0, b.shield - ACID_SHIELD_MULT)
+                        b.shield = max(0, b.shield - ACIDSHOT_TICK_DMG
+                                       * ACID_SHIELD_MULT)
                         continue
-                    b.hp -= 1
+                    b.hp -= ACIDSHOT_TICK_DMG
                     if b.hp <= 0:
-                        self._kill_brick(b)
+                        self._kill_brick(b, ACIDSHOT_TICK_DMG)
                         dissolved.append(b)
                         break
             elif b.acid_tick:
@@ -1725,7 +1729,7 @@ class Game:
                                              brick.slow_pct + TARSHOT_SLOW)
                         brick.slow_t = TARSHOT_TIME
                     if proj.acid:
-                        # Acid bullet: a 3s burn at ACIDSHOT_DPS, then
+                        # Acid bullet: a 3s burn (ACIDSHOT_TICK_DMG/s), then
                         # the ball drops as a spent shell
                         brick.acid_dot = ACIDSHOT_DOT
                         brick.acid_t = max(brick.acid_t, ACIDSHOT_DOT)
@@ -2230,7 +2234,7 @@ class Game:
             acid["tick"] -= dt
             if acid["tick"] <= 0:
                 acid["tick"] = ACID_TICK
-                damage = max(1, self.wave // 10)
+                damage = max(1, self.wave // ACID_POOL_DIV)
                 to_remove: list[int] = []
                 for i, brick in enumerate(self.bricks):
                     rect = cell_rect(brick.col, brick.row, brick.shape,
