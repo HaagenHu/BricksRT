@@ -129,6 +129,11 @@ def _build_all(rate: int) -> dict[str, list[list[float]]]:
     cues["shield_break"] = [M((0, T(0.22, 2600, 2100, 0.07), 0.4),
                               (0.015, T(0.2, 3400, 2800, 0.06), 0.35),
                               (0, N(0.12, 0.04, 0.9), 0.3))]
+    # Paddle up: soft rising two-tone shimmer; break: falling glassy saw
+    cues["paddle_up"] = [M((0, T(0.12, 660, 700, 0.06), 0.35),
+                           (0.06, T(0.18, 990, 1050, 0.09), 0.35))]
+    cues["paddle_break"] = [M((0, T(0.25, 900, 300, 0.1, "saw"), 0.35),
+                              (0, N(0.1, 0.04, 0.8), 0.3))]
     # Pickup: bright two-note blip
     cues["pickup"] = [M((0, T(0.08, 880, 880, 0.05), 0.6),
                            (0.07, T(0.1, 1320, 1320, 0.06), 0.6))]

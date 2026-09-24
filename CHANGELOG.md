@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Paddles** (from wave 50): a stationary deflector that appears on
+  its own — 20% chance per new wave, up to 2 at once — in open space
+  in the lower field at a random tilt (up to 60 deg). It mirror-bounces
+  shots off either face for 6s, then goes (blinking through its last
+  second); a brick overrunning it shatters it at once. Each rolls a
+  kind: still (40%), spinning at 60 deg/s (30%), or kicked round 15
+  deg by every hit (30%). Collision is swept, so fast shots can't
+  tunnel through; each deflection counts toward the anti-loop gravity;
+  spent shells pass through. New cues for appearing and breaking; a
+  FIELD row on the help screen
+
 ## v0.6.0 — Balance, shields, acid, lightning, practice (2026-09-24)
 
 ### Balance

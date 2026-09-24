@@ -14,6 +14,7 @@ from game import (
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
     HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN, COLS, MAX_ROWS,
     LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME, SHIELD_HIT_TIME,
+    PADDLE_LIFE, PADDLE_LEN, PADDLE_FLASH_TIME, PADDLE_COLOR,
     Brick, Game, cell_rect, make_shards, step_shards,
     shape_points, shield_wraps, down_faces, SHIELD_CURL, SHIELD_ROUND_ARC,
 )
@@ -591,6 +592,66 @@ def _draw_shield(screen: pygame.Surface, brick: Brick, rect: pygame.Rect,
     draw_glow(screen, TEXT_COLOR, gx, gy, 9, 0.7 * power)
 
 
+PADDLE_GROW_TIME = 0.2  # s the bar takes to grow in
+PADDLE_WARN_TIME = 1.0  # s before it goes: blink as a warning
+
+
+def _bar(screen: pygame.Surface, color, a, b, width: float):
+    """Thick segment with round caps at its true width at any angle
+    (pygame's thick lines come out thinner when diagonal)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    d = math.hypot(dx, dy) or 1.0
+    ox, oy = -dy / d * width / 2, dx / d * width / 2
+    pygame.draw.polygon(screen, color, [(a[0] + ox, a[1] + oy),
+                                        (b[0] + ox, b[1] + oy),
+                                        (b[0] - ox, b[1] - oy),
+                                        (a[0] - ox, a[1] - oy)])
+    for end in (a, b):
+        pygame.draw.circle(screen, color, (int(end[0]), int(end[1])),
+                           max(1, int(width / 2)))
+
+
+def draw_paddle(screen: pygame.Surface, pd: dict, time: float):
+    """Glowing bar with round caps. Grows in, flashes white on each
+    deflection, blinks through its last second, fades out. Spinners
+    show their sweep circle faintly; kickers a pivot at the center."""
+    age = PADDLE_LIFE - pd["timer"]
+    grow = min(1.0, age / PADDLE_GROW_TIME)
+    fade = min(1.0, pd["timer"] / 0.4)
+    blink = (0.45 if pd["timer"] < PADDLE_WARN_TIME and int(time * 10) % 2
+             else 1.0)
+    power = fade * blink
+    flash = pd["flash"] / PADDLE_FLASH_TIME
+    col = _mix(PADDLE_COLOR, TEXT_COLOR, 0.7 * flash)
+    x, y = pd["x"], pd["y"]
+    ux, uy = math.cos(pd["angle"]), math.sin(pd["angle"])
+    h = PADDLE_LEN / 2 * grow
+    a = (x - ux * h, y - uy * h)
+    b = (x + ux * h, y + uy * h)
+
+    if pd.get("kind") == "spin":
+        pygame.draw.circle(screen, _mix(BG_COLOR, PADDLE_COLOR, 0.2 * power),
+                           (int(x), int(y)), int(PADDLE_LEN / 2), 1)
+    for k in range(5):
+        f = (k + 0.5) / 5
+        draw_glow(screen, col, a[0] + (b[0] - a[0]) * f,
+                  a[1] + (b[1] - a[1]) * f, 14, 0.35 * power + 0.45 * flash)
+    _bar(screen, _mix(BG_COLOR, col, 0.4 * power), a, b, 10)
+    _bar(screen, _mix(BG_COLOR, col, power), a, b, 6)
+    _bar(screen, _mix(BG_COLOR, TEXT_COLOR, power), a, b, 2)
+    if pd.get("kind") == "kick":
+        pygame.draw.circle(screen, _mix(BG_COLOR, TEXT_COLOR, power),
+                           (int(x), int(y)), 4, 1)
+
+
+def draw_paddle_icon(screen: pygame.Surface, px: int, py: int):
+    """Help-screen icon: a small tilted glowing bar."""
+    a, b = (px - 9, py + 5), (px + 9, py - 5)
+    draw_glow(screen, PADDLE_COLOR, px, py, 14, 0.4)
+    pygame.draw.line(screen, _mix(BG_COLOR, PADDLE_COLOR, 0.45), a, b, 7)
+    pygame.draw.line(screen, PADDLE_COLOR, a, b, 3)
+
+
 def _draw_crackle(screen: pygame.Surface, rect: pygame.Rect, brick: Brick,
                   time: float):
     """Lightning-stunned brick: two short arcs crawling around its edge,
@@ -1075,6 +1136,10 @@ def draw_game(screen: pygame.Surface, game: Game,
         wt_txt = small_font.render(f"{weight}/{wall['max_weight']}  {ttl:.0f}s",
                                    True, MORTAR_WALL_COLOR)
         screen.blit(wt_txt, (4, wy + 4))
+
+    # Paddles (stationary deflectors)
+    for pd in game.paddles:
+        draw_paddle(screen, pd, game.game_time)
 
     # Placed AoE pickups (stationary icons)
     for items, gcolor in ((game.placed_freezes, FREEZE_COLOR),
@@ -1644,5 +1709,10 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(lambda ry: draw_skull_icon(screen, icon_x, ry),
         "Skull — halves brick HP/shields + ammo (10 min+)")
 
+    y += section_gap
+    header("FIELD — appears on its own; bricks overrunning it break it")
+    row(lambda ry: draw_paddle_icon(screen, icon_x, ry),
+        f"Paddle — deflects shots for 6s; some spin (wave {UNLOCK['paddle']}+)")
+
     hint = small_font.render("Click or Esc to return", True, (180, 180, 180))
-    screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 30)))
+    screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT - 18)))

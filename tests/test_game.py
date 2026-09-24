@@ -463,7 +463,7 @@ def test_sound_player():
         cues = ("kill", "explode", "mortar_launch", "mine_set", "acid",
                 "tar", "wall_up", "wall_break", "pickup", "freeze",
                 "reverse", "lightning", "skull", "gameover", "new_best",
-                "shield_break")
+                "shield_break", "paddle_up", "paddle_break")
         for cue in cues:
             assert sfx.cues[cue], cue
             assert all(s.get_length() > 0 for s in sfx.cues[cue])
@@ -577,6 +577,120 @@ def test_shield_flash_and_break():
         gm.update(1 / 60)
     assert b.shield_hit_t == 0.0
     assert "shield_break" not in gm.drain_events()  # breaks only once
+
+
+def _paddle(gm, x=240.0, y=400.0, deg=0.0, kind="still", turn=0.0):
+    pd = {"x": x, "y": y, "angle": g.math.radians(deg),
+          "timer": g.PADDLE_LIFE, "flash": 0.0, "kind": kind, "turn": turn}
+    gm.paddles = [pd]
+    return pd
+
+
+def test_paddle_kinds_turn():
+    gm = _fresh_game(wave=60)
+    gm.bricks, gm.pickups = [], []
+    # Spinner turns steadily
+    spin = g.math.radians(g.PADDLE_SPIN)
+    pd = _paddle(gm, kind="spin", turn=spin)
+    for _ in range(30):  # 0.5s
+        gm.update(1 / 60)
+    assert abs(pd["angle"] - spin * 0.5) < 1e-6
+    # Kicker only turns when hit, one notch per hit, same way each time
+    kick = -g.math.radians(g.PADDLE_KICK)
+    pd = _paddle(gm, kind="kick", turn=kick)
+    gm.update(1 / 60)
+    assert pd["angle"] == 0.0
+    for n in (1, 2):
+        p = Projectile((240, 400), (0, -g.PROJECTILE_SPEED))
+        p.prev.update(240, 412)
+        gm._collide_paddles(p)
+        assert abs(pd["angle"] - kick * n) < 1e-9
+    # All three kinds show up
+    kinds = set()
+    for seed in range(300):
+        random.seed(seed)
+        gm2 = _fresh_game(wave=g.UNLOCK["paddle"] + 5)
+        gm2.spawn_wave()
+        kinds |= {p["kind"] for p in gm2.paddles}
+    assert kinds == {"still", "spin", "kick"}
+
+
+def test_paddle_spawns_from_its_wave_clear_of_bricks():
+    seen_early = seen_late = 0
+    for seed in range(200):
+        random.seed(seed)
+        early = _fresh_game(wave=g.UNLOCK["paddle"] - 2)
+        early.spawn_wave()  # -> unlock wave - 1: never
+        seen_early += len(early.paddles)
+        late = _fresh_game(wave=g.UNLOCK["paddle"] + 5)
+        late.spawn_wave()
+        seen_late += len(late.paddles)
+        for pd in late.paddles:
+            assert not late._paddle_blocked(pd, margin=0)
+            assert g.GRID_TOP < pd["y"] < g.GRID_BOTTOM - g.CELL_SIZE
+            assert abs(g.math.degrees(pd["angle"])) <= g.PADDLE_MAX_TILT
+    assert seen_early == 0
+    # ~PADDLE_CHANCE of waves (loose bounds for 200 samples)
+    assert 0.5 * g.PADDLE_CHANCE < seen_late / 200 < 1.6 * g.PADDLE_CHANCE
+
+
+def test_paddle_mirror_bounce():
+    S = g.PROJECTILE_SPEED
+    gm = _fresh_game(wave=60)
+    gm.bricks = []
+    # Flat paddle, ball rising into its underside: vy flips, vx kept
+    pd = _paddle(gm, deg=0)
+    p = Projectile((250, 400 + g.PROJECTILE_RADIUS - 1), (100, -S))
+    p.prev.update(250, 420)
+    gm._collide_paddles(p)
+    assert p.vel.y > 0 and p.vel.x == 100
+    assert p.pos.y > 400  # pushed back out below
+    assert p.border_hits == 1 and pd["flash"] > 0  # counts vs anti-loop
+    # 45 degree paddle turns a straight-up shot sideways
+    _paddle(gm, deg=45)
+    p = Projectile((240, 400), (0, -S))
+    p.prev.update(240, 412)
+    gm._collide_paddles(p)
+    assert abs(p.vel.y) < 1e-6 and abs(abs(p.vel.x) - S) < 1e-6
+    # Swept: a shot that jumped clean through the bar this frame still
+    # bounces (no tunnelling), off the side it came from
+    _paddle(gm, deg=0)
+    p = Projectile((240, 380), (0, -S))  # now 20px above the paddle
+    p.prev.update(240, 420)              # was 20px below it
+    gm._collide_paddles(p)
+    assert p.vel.y > 0 and p.pos.y > 400
+    # Missing the bar's end: no bounce
+    p = Projectile((240 + g.PADDLE_LEN, 400), (0, -S))
+    p.prev.update(240 + g.PADDLE_LEN, 420)
+    gm._collide_paddles(p)
+    assert p.vel.y < 0
+
+
+def test_paddle_overrun_expiry_and_shells():
+    gm = _fresh_game(wave=60)
+    gm.bricks, gm.pickups = [], []
+    gm.drain_events()
+    # Overrun: a brick covering it shatters it at once
+    rect = g.cell_rect_full(3, 5, "square", gm.brick_offset)
+    _paddle(gm, x=rect.centerx, y=rect.centery)
+    gm.bricks = [Brick(col=3, row=5, hp=10)]
+    gm.update(1 / 60)
+    assert not gm.paddles and "paddle_break" in gm.drain_events()
+    # Expiry after PADDLE_LIFE
+    gm.bricks = []
+    _paddle(gm)
+    for _ in range(round(g.PADDLE_LIFE * 60) + 2):
+        gm.freeze_timer = 1.0  # keep new rows from spawning mid-test
+        gm.update(1 / 60)
+    assert not gm.paddles
+    # Spent shells fall straight through
+    _paddle(gm, deg=0)
+    p = Projectile((240, 380), (0, 0))
+    g.Game._spend(p, "acid")
+    gm.projectiles = [p]
+    for _ in range(30):
+        gm.update(1 / 60)
+    assert p.pos.y > 400 and p.vel.y > 0
 
 
 def test_reload_feeder_caps_rate():

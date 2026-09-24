@@ -138,7 +138,14 @@ adding raw damage.
 
 Recommended first: Split shot + Updraft.
 
-### Deflectors (suggestion, not implemented)
+### Deflectors
+
+**Status:** the **paddle** is implemented (Unreleased) as a random
+field appearance, not a mortar type: from wave 50, 20% chance per new
+wave, max 2, 6s, random tilt up to 60 deg, kinds still 40% / spin
+(60 deg/s) 30% / kick (15 deg per hit) 30% — continuous spin was kept
+after all: a 4x volley spread is already about as random. The rest of
+this section is the original proposal.
 
 Stationary objects that change a ball's direction or position — a
 generalization of Updraft. They sit in the bounce economy: since the

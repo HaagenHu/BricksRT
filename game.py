@@ -139,6 +139,22 @@ ACID_SHIELD_MULT = 2    # acid (burn and pool) hits shields this much harder
 SHELL_DROP_SPEED = 120.0  # px/s downward right after the hit
 SHELL_GRAVITY = 900.0     # px/s^2 as it falls
 ACID_SHIELD_COLOR = (120, 255, 0)  # shield sparks while acid eats it
+
+# Paddle: a stationary deflector that appears on its own (not a pickup)
+# on a new wave, mirror-bounces shots off either face, and disappears
+# after PADDLE_LIFE — or shatters as soon as a brick overruns it
+PADDLE_CHANCE = 0.20      # per new wave, from UNLOCK["paddle"]
+PADDLE_MAX = 2            # at once
+PADDLE_LIFE = 6.0         # seconds
+PADDLE_LEN = 70.0         # px
+PADDLE_MAX_TILT = 60.0    # degrees either side of horizontal
+PADDLE_FLASH_TIME = 0.12  # visual flash per deflection
+PADDLE_COLOR = (150, 190, 255)
+# Each paddle rolls a kind: still, spinning steadily, or kicked round a
+# notch by every hit (always the same way, so a stream fans out)
+PADDLE_KINDS = (("still", 0.4), ("spin", 0.3), ("kick", 0.3))
+PADDLE_SPIN = 60.0        # degrees/s for "spin"
+PADDLE_KICK = 15.0        # degrees per hit for "kick"
 WALLSHOT_STUN = 2.0     # wall bullet: full stop on the hit brick
 STICKY_FUSE = 1.5       # mine bullet: seconds until the charge blows
 
@@ -171,6 +187,7 @@ UNLOCK = {
     # merge into bomb)
     "mines": 10, "wall": 20, "bombs": 30, "tar": 40,
     "acid": 60, "freeze": 70, "reverse": 80, "lightning": 90,
+    "paddle": 50,  # the slot the fireball merge freed
     "homing": 100,
     # Brick shapes and properties
     "round": 15, "diamond": 15,
@@ -265,6 +282,7 @@ class Projectile:
     def __init__(self, pos: pygame.math.Vector2, vel: pygame.math.Vector2):
         self.pos = pygame.math.Vector2(pos)
         self.vel = pygame.math.Vector2(vel)
+        self.prev = pygame.math.Vector2(pos)  # position before this move
         self.alive = True
         self.exited_bottom = False
         self.border_hits = 0
@@ -298,6 +316,7 @@ class Projectile:
         if not self.alive:
             return
         self.trail.append((self.pos.x, self.pos.y))
+        self.prev.update(self.pos)
         if self.shell:
             self.vel.y += SHELL_GRAVITY * dt
         self.pos += self.vel * dt
@@ -543,6 +562,9 @@ class Game:
         self.gun_kick = 0.0  # recoil remaining (visual only)
         # Cue names for the frontend (sound), drained once per frame
         self.events: list[str] = []
+        # Paddles: {x, y, angle (rad), timer, flash, kind, turn}; turn is
+        # the signed spin rate (rad/s) or kick step (rad), 0 when still
+        self.paddles: list[dict] = []
         # Mortar shells in flight: {sx, sy, tx, ty, type, t, duration}
         self.mortar_shells: list[dict] = []
         self.freeze_timer = 0.0  # seconds remaining of freeze
@@ -726,6 +748,8 @@ class Game:
                 self._collide_pickups(p)
             if p.alive:
                 self._collide_walls(p)
+            if p.alive and self.paddles:
+                self._collide_paddles(p)
             if p.alive:
                 for placed, trigger in self._placed_aoe():
                     self._collide_placed_aoe(p, placed, trigger)
@@ -758,6 +782,10 @@ class Game:
 
         # Mines: explode when any brick overlaps them
         self._check_mines()
+
+        # Paddles: expire, or shatter once a brick overruns them
+        if self.paddles:
+            self._update_paddles(dt)
 
         # Sticky charges: fuse down, then blow at the host brick's
         # position (its last known spot if it already died)
@@ -1393,6 +1421,115 @@ class Game:
         _spawn_pixel("freeze", 0.12, self.placed_freezes)
         _spawn_pixel("reverse", 0.10, self.placed_reverses)
         _spawn_pixel("lightning", 0.10, self.placed_lightnings)
+
+        # Paddle: appears by itself, already active
+        if (self.wave >= UNLOCK["paddle"] and len(self.paddles) < PADDLE_MAX
+                and random.random() < PADDLE_CHANCE):
+            self._spawn_paddle()
+
+    def _paddle_ends(self, pd: dict) -> tuple[tuple[float, float],
+                                                 tuple[float, float]]:
+        ux, uy = math.cos(pd["angle"]), math.sin(pd["angle"])
+        h = PADDLE_LEN / 2
+        return ((pd["x"] - ux * h, pd["y"] - uy * h),
+                (pd["x"] + ux * h, pd["y"] + uy * h))
+
+    def _paddle_blocked(self, pd: dict, margin: float) -> bool:
+        """Does any brick cover (or come within margin of) the paddle?"""
+        (x1, y1), (x2, y2) = self._paddle_ends(pd)
+        pts = [(x1 + (x2 - x1) * k / 8, y1 + (y2 - y1) * k / 8)
+               for k in range(9)]
+        for b in self.bricks:
+            r = cell_rect_full(b.col, b.row, b.shape, self._brick_off(b))
+            r = r.inflate(margin * 2, margin * 2)
+            if any(r.collidepoint(px, py) for px, py in pts):
+                return True
+        return False
+
+    def _spawn_paddle(self):
+        """A random tilted paddle in open space in the lower field, clear
+        of bricks, other paddles and the gun."""
+        h = PADDLE_LEN / 2
+        for _ in range(20):
+            tilt = math.radians(random.uniform(-PADDLE_MAX_TILT,
+                                               PADDLE_MAX_TILT))
+            kind = random.choices([k for k, _ in PADDLE_KINDS],
+                                  weights=[w for _, w in PADDLE_KINDS])[0]
+            rate = {"still": 0.0, "spin": math.radians(PADDLE_SPIN),
+                    "kick": math.radians(PADDLE_KICK)}[kind]
+            pd = {
+                "x": random.uniform(h + 8, WIDTH - h - 8),
+                "y": random.uniform(GRID_TOP + CELL_SIZE * 3,
+                                    GRID_BOTTOM - CELL_SIZE * 1.5),
+                "angle": tilt, "timer": PADDLE_LIFE, "flash": 0.0,
+                "kind": kind, "turn": rate * random.choice((-1, 1)),
+            }
+            if any(math.hypot(pd["x"] - o["x"], pd["y"] - o["y"]) < PADDLE_LEN
+                   for o in self.paddles):
+                continue
+            # A spinner needs its whole sweep clear, not just its start
+            angles = ([tilt + math.pi * k / 6 for k in range(6)]
+                      if kind == "spin" else [tilt])
+            if any(self._paddle_blocked({**pd, "angle": a}, margin=12)
+                   for a in angles):
+                continue
+            self.paddles.append(pd)
+            self._emit("paddle_up")
+            return
+
+    def _collide_paddles(self, p: Projectile):
+        """Mirror bounce off either face. Swept along the ball's path
+        this frame (p.prev -> p.pos), so a fast shot can't tunnel through
+        the thin bar."""
+        r = PROJECTILE_RADIUS
+        for pd in self.paddles:
+            ux, uy = math.cos(pd["angle"]), math.sin(pd["angle"])
+            nx, ny = -uy, ux  # face normal
+            h = PADDLE_LEN / 2
+            rx, ry = p.pos.x - pd["x"], p.pos.y - pd["y"]
+            s1, t1 = rx * nx + ry * ny, rx * ux + ry * uy
+            px0, py0 = p.prev.x, p.prev.y
+            s0 =(px0 - pd["x"]) * nx + (py0 - pd["y"]) * ny
+            t0 = (px0 - pd["x"]) * ux + (py0 - pd["y"]) * uy
+            vn = p.vel.x * nx + p.vel.y * ny
+            side = 0.0
+            if s0 != 0 and s0 * s1 <= 0:  # crossed (or reached) the line
+                tc = t0 + (t1 - t0) * (s0 / (s0 - s1))
+                if abs(tc) <= h + r:
+                    side, t1 = math.copysign(1.0, s0), tc
+            elif abs(s1) < r and abs(t1) <= h + r and s1 * vn < 0:
+                side = math.copysign(1.0, s1)  # touching, moving in
+            if not side:
+                continue
+            p.vel.x -= 2 * vn * nx
+            p.vel.y -= 2 * vn * ny
+            t = max(-h, min(h, t1))
+            p.pos.x = pd["x"] + ux * t + nx * side * (r + 1)
+            p.pos.y = pd["y"] + uy * t + ny * side * (r + 1)
+            p.border_hits += 1  # counts toward the anti-loop gravity
+            pd["flash"] = PADDLE_FLASH_TIME
+            if pd.get("kind") == "kick":
+                pd["angle"] += pd["turn"]
+            return
+
+    def _update_paddles(self, dt: float):
+        """Age paddles; shatter any a brick has overrun."""
+        keep = []
+        for pd in self.paddles:
+            pd["timer"] -= dt
+            pd["flash"] = max(0.0, pd["flash"] - dt)
+            if pd.get("kind") == "spin":
+                pd["angle"] += pd["turn"] * dt
+            if self._paddle_blocked(pd, margin=0):
+                (x1, y1), (x2, y2) = self._paddle_ends(pd)
+                for k in range(5):
+                    f = (k + 0.5) / 5
+                    self._spawn_sparks(x1 + (x2 - x1) * f, y1 + (y2 - y1) * f,
+                                       3, PADDLE_COLOR)
+                self._emit("paddle_break")
+            elif pd["timer"] > 0:
+                keep.append(pd)
+        self.paddles = keep
 
     # ------------------------------------------------------------------
     # Aim & fire
