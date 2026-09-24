@@ -239,8 +239,8 @@ class Brick:
     row: int
     hp: int
     shape: str = "square"
-    tri_dir: str = "up"  # orientation: triangles up/down/left/right,
-                         # trapezoids up (narrow top) / down (narrow base)
+    tri_dir: str = "up"  # orientation of triangles and trapezoids:
+                         # up/down/left/right (trapezoid: its narrow side)
     shield: int = 0
     held: float = 0.0    # px held back by a wall/stack this frame
     acid_t: float = 0.0  # seconds of acid tint remaining
@@ -373,11 +373,17 @@ def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
         return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
                  cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
                 for i in range(6)]
-    if shape == "trapezoid":
+    if shape == "trapezoid":  # tri_dir = the narrow side's direction
         tw = h * 0.6
-        if tri_dir == "down":  # upside down: wide top, narrow base
+        if tri_dir == "down":  # wide top, narrow base
             return [(cx - h, cy - h), (cx + h, cy - h),
                     (cx + tw, cy + h), (cx - tw, cy + h)]
+        if tri_dir == "left":  # narrow left side, wide right side
+            return [(cx - h, cy - tw), (cx + h, cy - h),
+                    (cx + h, cy + h), (cx - h, cy + tw)]
+        if tri_dir == "right":  # wide left side, narrow right side
+            return [(cx - h, cy - h), (cx + h, cy - tw),
+                    (cx + h, cy + tw), (cx - h, cy + h)]
         return [(cx - tw, cy - h), (cx + tw, cy - h),
                 (cx + h, cy + h), (cx - h, cy + h)]
     if shape == "triangle":
@@ -1357,12 +1363,10 @@ class Game:
             occupied.add(c)
             if shape == "wide":
                 hp *= 2
-            # Orientation: triangles point any way; trapezoids come as an
-            # up/down pair (narrow top / narrow base)
-            if shape == "triangle":
+            # Orientation: triangles and trapezoids point any of 4 ways
+            # (for a trapezoid, the side its narrow edge faces)
+            if shape in ("triangle", "trapezoid"):
                 tri_dir = random.choice(["up", "down", "left", "right"])
-            elif shape == "trapezoid":
-                tri_dir = random.choice(["up", "down"])
             else:
                 tri_dir = "up"
             shield = 0
@@ -2097,14 +2101,9 @@ class Game:
                            y_offset: float = 0) -> bool:
         rect = cell_rect(brick.col, brick.row, "square", y_offset)
         cx, cy = rect.center
-        hw, hh = BRICK_SIZE / 2, BRICK_SIZE / 2
-        tw = hw * 0.6
-        if brick.tri_dir == "down":  # upside down: wide top, narrow base
-            verts = [(cx - hw, cy - hh), (cx + hw, cy - hh),
-                     (cx + tw, cy + hh), (cx - tw, cy + hh)]
-        else:
-            verts = [(cx - tw, cy - hh), (cx + tw, cy - hh),
-                     (cx + hw, cy + hh), (cx - hw, cy + hh)]
+        # Same outline the renderer draws, in any of the 4 orientations
+        verts = shape_points("trapezoid", brick.tri_dir, cx, cy,
+                             BRICK_SIZE / 2)
         return self._collide_polygon(proj, verts, cx, cy)
 
     def tri_verts(self, brick: Brick, y_offset: float = 0):

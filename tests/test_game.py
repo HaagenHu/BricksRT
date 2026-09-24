@@ -483,8 +483,8 @@ def test_sound_player():
         pygame.mixer.quit()
 
 
-def test_trapezoid_pair():
-    # Both orientations spawn once trapezoids unlock
+def test_trapezoid_orientations():
+    # All four orientations spawn once trapezoids unlock
     dirs = set()
     for seed in range(300):
         random.seed(seed)
@@ -492,7 +492,26 @@ def test_trapezoid_pair():
         gm.bricks = []
         gm.spawn_wave()
         dirs |= {b.tri_dir for b in gm.bricks if b.shape == "trapezoid"}
-    assert dirs == {"up", "down"}
+    assert dirs == {"up", "down", "left", "right"}
+
+    # Left/right: a ball rising near the bottom-left corner hits the
+    # full-height left side of a right-pointing trapezoid, but is still
+    # below the slanted underside of a left-pointing one
+    def hits_low_left(tri_dir):
+        gm = _fresh_game(wave=40)
+        b = Brick(col=3, row=4, hp=10, shape="trapezoid", tri_dir=tri_dir)
+        gm.bricks = [b]
+        cx, cy = g.cell_rect(3, 4, "square", gm._brick_off(b)).center
+        h = g.BRICK_SIZE / 2
+        p = Projectile((cx - 0.9 * h, cy + 0.9 * h), (0, -g.PROJECTILE_SPEED))
+        return gm._collide_trapezoid(p, b, gm._brick_off(b))
+
+    assert hits_low_left("right")
+    assert not hits_low_left("left")
+    # Both wrap their shield band around the corners (curl)
+    for d in ("left", "right"):
+        assert g.shield_wraps("trapezoid", d) and not g.shield_half(
+            "trapezoid", d)
 
     # Collision follows the orientation: a ball rising into the bottom
     # corner hits the wide base of an upright trapezoid, but passes the

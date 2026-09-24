@@ -12,6 +12,15 @@
   tunnel through; each deflection counts toward the anti-loop gravity;
   spent shells pass through. New cues for appearing and breaking; a
   FIELD row on the help screen
+- **Trapezoids point four ways**: left and right join up and down
+  (tri_dir = the side the narrow edge faces), 1 in 4 each, like the
+  triangles. Their shield band wraps with a curl; collision uses the
+  shared outline (shape_points) for all orientations. The menu's demo
+  bricks now use all four directions too
+- **HP numbers centered on the shape**: drawn at the polygon's area
+  centroid instead of its box center — triangles' numbers moved ~9px
+  into the wide part (they sat too close to the tip), trapezoids'
+  ~2px; triangles now fit numbers up to 32px wide before shrinking
 - **Shield band per shape, reworked** (protection follows the band):
   - Up/left/right triangles now wrap around their end corners with
     rounded bends like squares, diamonds, hexagons and upright

@@ -57,8 +57,24 @@ BRICK_HP_SIZE = 20  # px, brick HP number (the HUD's small text is 16)
 BRICK_HP_MIN = 14   # smallest step-down for long numbers
 # Widest HP number (px) that stays inside each shape at its center line;
 # longer numbers step the font down toward BRICK_HP_MIN
-HP_FIT = {"triangle": 28, "diamond": 34}
+# (Measured at the shape's centroid, where the number is drawn: a
+# triangle is ~37px wide there vs 28 at its box center)
+HP_FIT = {"triangle": 32, "diamond": 34}
 HP_FIT_DEFAULT = 44
+
+
+def _centroid(pts: list[tuple[float, float]]) -> tuple[float, float]:
+    """Area centroid of a polygon — where a label looks centered."""
+    a = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+        cross = x1 * y2 - x2 * y1
+        a += cross
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+    if abs(a) < 1e-9:
+        return (sum(p[0] for p in pts) / len(pts),
+                sum(p[1] for p in pts) / len(pts))
+    return cx / (3 * a), cy / (3 * a)
 
 
 def _hp_text(brick: Brick, color) -> pygame.Surface:
@@ -558,7 +574,7 @@ def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
     if shape in ("square", "wide", "tall"):
         r = rect.inflate(2 * gap, 2 * gap)
         poly = [r.topleft, r.topright, r.bottomright, r.bottomleft]
-    else:  # diamond, hexagon, triangles, trapezoids
+    else:  # diamond, hexagon, triangles, trapezoids (any orientation)
         poly = shape_points(shape, tri_dir, cx, cy, h)
     return _wrap_underside([(float(x), float(y)) for x, y in poly],
                            curl=shield_wraps(shape, tri_dir),
@@ -914,7 +930,10 @@ def draw_brick(screen: pygame.Surface, brick: Brick, y_offset: float = 0,
                                  (gx, gy + arm), 1)
 
     # HP text
-    _blit_centered(screen, _hp_text(brick, TEXT_COLOR), rect.center)
+    # At the shape's centroid, not its box center: on a triangle the box
+    # center sits ~9px toward the tip, so the number looked off
+    _blit_centered(screen, _hp_text(brick, TEXT_COLOR),
+                   _centroid(pts) if pts is not None else rect.center)
 
 
 def draw_dying_brick(screen: pygame.Surface, d: dict):
@@ -1577,7 +1596,7 @@ def _draw_menu_bricks(screen: pygame.Surface, now: float):
             "x": rng.randrange(COLS) * CELL_SIZE + CELL_SIZE / 2,
             "y": -CELL_SIZE / 2, "v": rng.uniform(18, 40),
             "shape": rng.choice(MENU_SHAPES),
-            "tri_dir": rng.choice(("up", "down")),
+            "tri_dir": rng.choice(("up", "down", "left", "right")),
             "hp": rng.randint(1, 100),
             "pop_y": rng.uniform(0.3, 0.95) * HEIGHT,
         })
