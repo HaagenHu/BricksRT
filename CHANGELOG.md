@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+- **Balance — fewer extra balls late**: a new wave's row now carries
+  an extra-ball pickup by chance, tapering from 80% at wave 1 to 40% at
+  wave 100 and after (was: every wave except every 5th). A perfect run
+  arrives at wave 100 with ~61 balls instead of 81; early waves are
+  nearly unchanged (~8 by wave 10, was 9)
 - **Practice start** (`py main.py --wave N`): jump to wave N with a
-  matching arsenal — the balls a perfect run would hold by then (1 +
-  one per earlier non-5th wave, ~80% of N) and 3 of each unlocked
-  ammo type — for
+  matching arsenal — the balls a perfect run would hold by then on
+  average and 3 of each unlocked ammo type — for
   testing late-game content; marked PRACTICE in the HUD and never
   records a highscore
 - **Lightning**: the bolt chains nearest-first through its targets

@@ -56,6 +56,12 @@ GUN_COOLDOWN = 0.12  # seconds between shots
 GUN_BARREL_LEN = 40  # px — shots launch from the barrel tip
 GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
 STARTING_GUN_AMMO = 1
+# Extra-ball pickup on a new wave's row: a per-wave chance that tapers
+# linearly from START (wave 1) to END (wave TAPER_WAVES and beyond), so
+# the early game stays friendly and the late game gets tight
+EXTRA_BALL_CHANCE_START = 0.8
+EXTRA_BALL_CHANCE_END = 0.4
+EXTRA_BALL_TAPER_WAVES = 100
 PRACTICE_STOCK = 3  # units of each unlocked ammo type on a practice start
 AMMO_PER_PICKUP = 1
 
@@ -315,6 +321,13 @@ def _apply_gravity(proj: Projectile, dt: float):
     proj.vel.y = math.sin(new_angle) * speed
 
 
+def extra_ball_chance(wave: int) -> float:
+    """Chance that wave `wave`'s new row carries an extra-ball pickup."""
+    t = min(1.0, max(0, wave - 1) / (EXTRA_BALL_TAPER_WAVES - 1))
+    return (EXTRA_BALL_CHANCE_START
+            + (EXTRA_BALL_CHANCE_END - EXTRA_BALL_CHANCE_START) * t)
+
+
 def make_shards(cx: float, cy: float, w: float, h: float,
                 hp: int) -> list[dict]:
     """Burst of spinning triangles flying out from a killed brick
@@ -451,19 +464,18 @@ class Game:
     def start(self, start_wave: int = 1):
         """New run. start_wave > 1 is a practice start for testing: it
         jumps to that wave with a comparable arsenal and never records a
-        highscore. Balls = what a perfect run would hold on arrival: the
-        starting ball plus one per earlier wave that spawns an extra
-        ball (all but every 5th, i.e. 80%); plus some stock of every
-        unlocked type."""
+        highscore. Balls = what a perfect run would hold on arrival on
+        average: the starting ball plus the expected extra balls of the
+        earlier waves (their tapering chances summed); plus some stock
+        of every unlocked type."""
         self.reset()
         self.phase = "playing"
         self.gun_cooldown = 0.5  # aim delay before first shot
         if start_wave > 1:
             self.practice = True
             self.wave = start_wave - 1  # spawn_wave steps onto it
-            passed = start_wave - 1
-            self.gun_ammo = (STARTING_GUN_AMMO
-                             + (passed - passed // 5) * AMMO_PER_PICKUP)
+            expected = sum(extra_ball_chance(w) for w in range(1, start_wave))
+            self.gun_ammo = STARTING_GUN_AMMO + round(expected * AMMO_PER_PICKUP)
             for t in AMMO_TYPES:
                 if start_wave >= PICKUP_UNLOCK[t]:
                     self.ammo_inv[t] = PRACTICE_STOCK
@@ -1208,8 +1220,10 @@ class Game:
                                      tri_dir=tri_dir, shield=shield,
                                      spawn_t=SPAWN_ANIM_TIME))
 
-        # Spawn ammo pickup (row 0 only, not during reverse, skip every 5th wave)
-        if remaining and self.reverse_timer <= 0 and self.wave % 5 != 0:
+        # Extra-ball pickup: row 0 only, not during reverse, with a chance
+        # that tapers over the waves (see extra_ball_chance)
+        if (remaining and self.reverse_timer <= 0
+                and random.random() < extra_ball_chance(self.wave)):
             cc = random.choice(remaining)
             self.pickups.append({"col": cc, "row": 0, "type": "ammo"})
 

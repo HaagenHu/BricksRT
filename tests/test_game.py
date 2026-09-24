@@ -480,13 +480,23 @@ def test_sound_player():
         pygame.mixer.quit()
 
 
+def test_extra_ball_chance_tapers():
+    assert g.extra_ball_chance(1) == g.EXTRA_BALL_CHANCE_START
+    end = g.EXTRA_BALL_CHANCE_END
+    assert abs(g.extra_ball_chance(g.EXTRA_BALL_TAPER_WAVES) - end) < 1e-9
+    assert g.extra_ball_chance(500) == end  # flat after the taper
+    chances = [g.extra_ball_chance(w) for w in range(1, 120)]
+    assert all(a >= b for a, b in zip(chances, chances[1:]))  # never rises
+
+
 def test_practice_start():
     gm = Game()
     gm.start(60)
     assert gm.practice and gm.wave == 60
     assert gm.bricks and all(b.hp >= 60 for b in gm.bricks)  # wave HP
-    # 1 starting ball + one per earlier non-5th wave: 59 - 11 + 1
-    assert gm.gun_ammo == 49
+    # 1 starting ball + the expected extra balls of waves 1..59
+    expected = sum(g.extra_ball_chance(w) for w in range(1, 60))
+    assert gm.gun_ammo == 1 + round(expected)
     for t in g.AMMO_TYPES:  # stock of exactly the types unlocked by 60
         expect = g.PRACTICE_STOCK if 60 >= g.PICKUP_UNLOCK[t] else 0
         assert gm.ammo_inv[t] == expect, t
