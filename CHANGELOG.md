@@ -12,6 +12,13 @@
   end corners with rounded bends — on squares, diamonds, hexagons,
   downward triangles and trapezoids; round bricks and up/left/right
   triangles keep a plain edge
+- **Shields block exactly what the band covers**: a bounce counts
+  against the shield when it lands on a downward-facing face, or
+  within the band's wrap around the end corners (was: any upward hit
+  from below the brick's center line). So downward triangles and
+  upside-down trapezoids are shielded along their whole underside,
+  and square bricks' lower side corners are now shielded too. The
+  geometry lives in game.py and the renderer draws from it
 - **New shape — upside-down trapezoid**: trapezoids now come in an
   up/down pair like the triangles (narrow top / narrow base), chosen
   50/50 from wave 30; collision follows the orientation

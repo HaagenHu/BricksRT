@@ -15,6 +15,7 @@ from game import (
     HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN, COLS, MAX_ROWS,
     LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME, SHIELD_HIT_TIME,
     Brick, Game, cell_rect, make_shards, step_shards,
+    shape_points, shield_wraps, down_faces, SHIELD_CURL, SHIELD_ROUND_ARC,
 )
 
 # UI typeface: first installed name wins (Bahnschrift ships with
@@ -470,8 +471,9 @@ def draw_bolt(screen: pygame.Surface, bolt: dict, time: float):
 SHIELD_GAP = 3        # px the band floats outside the brick's edge
 SHIELD_GLINT_HZ = 0.6  # glint passes per second
 SHIELD_LAYERED = 0.78  # strength above which a second band shows (7+)
-SHIELD_CURL = 9        # px the band wraps around each end corner
 SHIELD_BEND = 6        # px of rounding at every bend
+# SHIELD_CURL / shield_wraps / down_faces come from game.py: the band
+# drawn here is exactly the area that blocks hits there
 
 
 def _round_bends(pts: list[tuple[float, float]],
@@ -498,18 +500,7 @@ def _wrap_underside(poly: list[tuple[float, float]]
     SHIELD_CURL px around the corner at each end, bends rounded: the
     band cups the brick the way it does on squares."""
     n = len(poly)
-    cx = sum(p[0] for p in poly) / n
-    cy = sum(p[1] for p in poly) / n
-
-    def faces_down(i: int) -> bool:
-        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
-        ex, ey = x2 - x1, y2 - y1
-        nx, ny = ey, -ex  # a normal; flip it to point away from center
-        if nx * ((x1 + x2) / 2 - cx) + ny * ((y1 + y2) / 2 - cy) < 0:
-            nx, ny = -nx, -ny
-        return ny > 0.05 * math.hypot(nx, ny)
-
-    down = [faces_down(i) for i in range(n)]
+    down = down_faces(poly)
     start = next(i for i in range(n) if down[i] and not down[i - 1])
     chain = [poly[start]]
     j = start
@@ -535,10 +526,11 @@ def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
     the up/left/right triangles keep a plain edge."""
     cx, cy = rect.center
     h = BRICK_SIZE / 2 + gap
-    if shape == "round":  # lower arc, screen angles 0.3 .. pi-0.3
-        return [(cx + h * math.cos(a), cy + h * math.sin(a))
-                for a in (0.3 + (math.pi - 0.6) * k / 12 for k in range(13))]
-    if shape == "triangle" and tri_dir != "down":
+    if shape == "round":  # lower arc between the SHIELD_ROUND_ARC angles
+        a0, span = SHIELD_ROUND_ARC, math.pi - 2 * SHIELD_ROUND_ARC
+        return [(cx + h * math.cos(a0 + span * k / 12),
+                 cy + h * math.sin(a0 + span * k / 12)) for k in range(13)]
+    if not shield_wraps(shape, tri_dir):  # up/left/right triangles
         if tri_dir == "up":
             return [(cx - h, cy + h), (cx + h, cy + h)]
         if tri_dir == "left":  # bottom slant: apex to bottom-right
@@ -729,34 +721,6 @@ def brick_color(hp: int) -> tuple[int, int, int]:
         hue += 1.0
     r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 0.95)
     return (int(r * 255), int(g * 255), int(b * 255))
-
-
-def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
-                 h: float) -> list[tuple[float, float]] | None:
-    """Polygon vertices for a brick shape with half-size h, or None for
-    shapes drawn as a circle/rect (round, square, wide, tall)."""
-    if shape == "diamond":
-        return [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
-    if shape == "hexagon":
-        return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
-                 cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
-                for i in range(6)]
-    if shape == "trapezoid":
-        tw = h * 0.6
-        if tri_dir == "down":  # upside down: wide top, narrow base
-            return [(cx - h, cy - h), (cx + h, cy - h),
-                    (cx + tw, cy + h), (cx - tw, cy + h)]
-        return [(cx - tw, cy - h), (cx + tw, cy - h),
-                (cx + h, cy + h), (cx - h, cy + h)]
-    if shape == "triangle":
-        if tri_dir == "up":
-            return [(cx, cy - h), (cx + h, cy + h), (cx - h, cy + h)]
-        if tri_dir == "down":
-            return [(cx - h, cy - h), (cx + h, cy - h), (cx, cy + h)]
-        if tri_dir == "left":
-            return [(cx - h, cy), (cx + h, cy - h), (cx + h, cy + h)]
-        return [(cx - h, cy - h), (cx - h, cy + h), (cx + h, cy)]
-    return None
 
 
 DANGER_RED = (255, 50, 40)

@@ -327,6 +327,77 @@ def _apply_gravity(proj: Projectile, dt: float):
     proj.vel.y = math.sin(new_angle) * speed
 
 
+def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
+                 h: float) -> list[tuple[float, float]] | None:
+    """Polygon vertices for a brick shape with half-size h, or None for
+    shapes drawn as a circle/rect (round, square, wide, tall)."""
+    if shape == "diamond":
+        return [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
+    if shape == "hexagon":
+        return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
+                 cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
+                for i in range(6)]
+    if shape == "trapezoid":
+        tw = h * 0.6
+        if tri_dir == "down":  # upside down: wide top, narrow base
+            return [(cx - h, cy - h), (cx + h, cy - h),
+                    (cx + tw, cy + h), (cx - tw, cy + h)]
+        return [(cx - tw, cy - h), (cx + tw, cy - h),
+                (cx + h, cy + h), (cx - h, cy + h)]
+    if shape == "triangle":
+        if tri_dir == "up":
+            return [(cx, cy - h), (cx + h, cy + h), (cx - h, cy + h)]
+        if tri_dir == "down":
+            return [(cx - h, cy - h), (cx + h, cy - h), (cx, cy + h)]
+        if tri_dir == "left":
+            return [(cx - h, cy), (cx + h, cy - h), (cx + h, cy + h)]
+        return [(cx - h, cy - h), (cx - h, cy + h), (cx + h, cy)]
+    return None
+
+
+# Shield coverage, shared with the renderer so the band drawn is exactly
+# what blocks: every downward-facing face, plus SHIELD_CURL px around
+# the end corners on shapes whose band wraps (shield_wraps)
+SHIELD_CURL = 9            # px the band wraps around each end corner
+SHIELD_FACE_DOWN = 0.05    # min downward part of a face's unit normal
+SHIELD_ROUND_ARC = 0.3     # rad: a round brick's band spans 0.3..pi-0.3
+
+
+def shield_wraps(shape: str, tri_dir: str) -> bool:
+    """Does the shield band wrap around its end corners? Not on round
+    bricks or on up/left/right triangles (their band is a plain edge)."""
+    return not (shape == "round"
+                or (shape == "triangle" and tri_dir != "down"))
+
+
+def down_faces(poly: list[tuple[float, float]]) -> list[bool]:
+    """Per edge i (poly[i] -> poly[i+1]) of a convex outline: does its
+    outward normal point down (screen y+)?"""
+    n = len(poly)
+    cx = sum(p[0] for p in poly) / n
+    cy = sum(p[1] for p in poly) / n
+    out = []
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        nx, ny = y2 - y1, -(x2 - x1)  # a normal; flip it away from center
+        if nx * ((x1 + x2) / 2 - cx) + ny * ((y1 + y2) / 2 - cy) < 0:
+            nx, ny = -nx, -ny
+        out.append(ny > SHIELD_FACE_DOWN * math.hypot(nx, ny))
+    return out
+
+
+def brick_outline(brick: "Brick",
+                  y_offset: float) -> list[tuple[float, float]] | None:
+    """A brick's polygon outline in screen space (None for round)."""
+    if brick.shape == "round":
+        return None
+    if brick.shape in ("square", "wide", "tall"):
+        r = cell_rect(brick.col, brick.row, brick.shape, y_offset)
+        return [r.topleft, r.topright, r.bottomright, r.bottomleft]
+    cx, cy = cell_rect(brick.col, brick.row, "square", y_offset).center
+    return shape_points(brick.shape, brick.tri_dir, cx, cy, BRICK_SIZE / 2)
+
+
 def extra_ball_chance(wave: int) -> float:
     """Chance that wave `wave`'s new row carries an extra-ball pickup."""
     t = min(1.0, max(0, wave - 1) / (EXTRA_BALL_TAPER_WAVES - 1))
@@ -1604,9 +1675,7 @@ class Game:
             for i, brick in enumerate(self.bricks):
                 off = self._brick_off(brick)
                 shape = brick.shape
-                pre_vel_y = proj.vel.y
-                pre_pos_y = proj.pos.y
-                pre_pos_x = proj.pos.x
+                pre_vel_x, pre_vel_y = proj.vel.x, proj.vel.y
 
                 if shape == "round":
                     hit = self._collide_round(proj, brick, off)
@@ -1623,20 +1692,9 @@ class Game:
 
                 if hit:
                     brick.hit_t = HIT_FLASH_TIME
-                    if brick.shield > 0:
-                        rect_c = cell_rect_full(brick.col, brick.row,
-                                                shape, off)
-                        if shape in ("round", "diamond", "triangle"):
-                            from_below = (pre_vel_y < 0
-                                          and pre_pos_y > rect_c.centery)
-                        else:
-                            from_below = (pre_vel_y < 0
-                                          and pre_pos_y > rect_c.centery
-                                          and rect_c.left <= pre_pos_x <= rect_c.right)
-                        if from_below:
-                            brick.shield -= 1
-                        else:
-                            brick.hp -= 1
+                    if brick.shield > 0 and self._shield_absorbs(
+                            brick, off, pre_vel_x, pre_vel_y, proj):
+                        brick.shield -= 1
                     else:
                         brick.hp -= 1
 
@@ -1668,6 +1726,32 @@ class Game:
 
         for i in reversed(to_remove):
             self.bricks.pop(i)
+
+    def _shield_absorbs(self, brick: Brick, off: float, pre_vx: float,
+                        pre_vy: float, proj: Projectile) -> bool:
+        """Did this bounce land on the shield band? The bounce's velocity
+        change points along the struck face's outward normal: downward
+        faces are covered, and on wrapping shapes so is the band's curl,
+        SHIELD_CURL px around each end corner."""
+        nx, ny = proj.vel.x - pre_vx, proj.vel.y - pre_vy
+        d = math.hypot(nx, ny)
+        if d == 0:
+            return False
+        nx, ny = nx / d, ny / d
+        if brick.shape == "round":
+            return ny > math.sin(SHIELD_ROUND_ARC)
+        if ny > SHIELD_FACE_DOWN:
+            return True
+        if not shield_wraps(brick.shape, brick.tri_dir):
+            return False
+        # Contact point: the bounce left the ball just off the surface
+        px = proj.pos.x - nx * (PROJECTILE_RADIUS + 1)
+        py = proj.pos.y - ny * (PROJECTILE_RADIUS + 1)
+        poly = brick_outline(brick, off)
+        down = down_faces(poly)
+        corners = [poly[i] for i in range(len(poly)) if down[i] != down[i - 1]]
+        return any(math.hypot(px - x, py - y) <= SHIELD_CURL
+                   for x, y in corners)
 
     def _collide_rect(self, proj: Projectile, brick: Brick,
                       y_offset: float = 0) -> bool:

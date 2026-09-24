@@ -85,7 +85,10 @@ Reuse all shapes from Bricks:
 - Spawn HP = wave − skull cut: each skull permanently adds half the
   then-current spawn HP to the cut (e.g. skull at wave 110 → new
   bricks spawn at wave − 55)
-- Shields (bottom protection)
+- Shields (bottom protection): a bounce hits the shield if it lands
+  on a downward-facing face, or within 9px of the corners where the
+  band wraps (all shapes but round and up/left/right triangles) — the
+  drawn band is exactly the protected area
 - Merging (wave 70+): a spawning square can fuse with the square below it
   into a tall brick with combined HP
 - Rainbow color gradient by HP

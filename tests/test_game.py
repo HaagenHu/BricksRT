@@ -508,6 +508,52 @@ def test_trapezoid_pair():
     assert not rises_into_corner("down")
 
 
+def test_shield_covers_its_band():
+    """Shields block exactly where the band is drawn: downward faces,
+    plus the wrap around the end corners on wrapping shapes."""
+    R, S = g.PROJECTILE_RADIUS, g.PROJECTILE_SPEED
+
+    def strike(shape, tri_dir, where):
+        """Fire one ball at the brick; 'shield' or 'hp' took the hit."""
+        gm = _fresh_game(wave=60)
+        b = Brick(col=3, row=4, hp=10, shield=5, shape=shape, tri_dir=tri_dir)
+        gm.bricks = [b]
+        off = gm._brick_off(b)
+        full = g.cell_rect_full(3, 4, shape, off)
+        cx, cy = g.cell_rect(3, 4, "square", off).center
+        h = g.BRICK_SIZE / 2
+        # Rect bricks collide on the full cell; others on their outline
+        right = full.right if shape == "square" else cx + h
+        top = full.top if shape == "square" else cy - h
+        if where == "below":        # straight up into the underside
+            pos, vel = (cx, cy + h + R - 1), (0, -S)
+        elif where == "top":        # falling onto the top
+            pos, vel = (cx, top - R + 1), (0, S)
+        elif where == "side_low":   # into the right side, near the bottom
+            pos, vel = (right + R - 1, full.bottom - 4), (-S, 0)
+        elif where == "side_mid":   # into the right side, halfway up
+            pos, vel = (right + R - 1, cy), (-S, 0)
+        elif where == "upper_slant":  # tri-down right face, above center
+            n = (2 / 5 ** 0.5, 1 / 5 ** 0.5)  # its outward normal
+            px, py = cx + 0.75 * h, cy - 0.5 * h
+            pos = (px + n[0] * (R - 1), py + n[1] * (R - 1))
+            vel = (-n[0] * S, -n[1] * S)
+        p = Projectile(pos, vel)
+        gm._collide_bricks(p)
+        assert (b.shield, b.hp) != (5, 10), f"{shape} {where}: no hit"
+        return "shield" if b.shield < 5 else "hp"
+
+    assert strike("square", "up", "below") == "shield"
+    assert strike("square", "up", "side_low") == "shield"  # corner wrap
+    assert strike("square", "up", "side_mid") == "hp"
+    assert strike("square", "up", "top") == "hp"
+    assert strike("round", "up", "below") == "shield"
+    assert strike("round", "up", "side_mid") == "hp"
+    # Downward triangle: the whole V is covered now, not just below center
+    assert strike("triangle", "down", "upper_slant") == "shield"
+    assert strike("triangle", "down", "top") == "hp"
+
+
 def test_shield_flash_and_break():
     gm = _fresh_game(wave=60)
     b = Brick(col=3, row=4, hp=50, shield=2)
