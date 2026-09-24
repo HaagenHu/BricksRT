@@ -661,6 +661,28 @@ def test_paddle_kinds_turn():
     assert kinds == {"still", "spin", "kick"}
 
 
+def test_kick_paddle_tips_hold():
+    """A kicker turns on every hit; shots near its tips must still bounce
+    back off the side they came from, not end up through the bar."""
+    S, h = g.PROJECTILE_SPEED, g.PADDLE_LEN / 2
+    for turn in (1, -1):
+        for k in range(35):
+            gm = _fresh_game(wave=60)
+            gm.bricks, gm.pickups, gm.placed_walls = [], [], []
+            x = 240 - h + k * (2 * h / 34)  # across the bar, tip to tip
+            pd = _paddle(gm, kind="kick",
+                         turn=turn * g.math.radians(g.PADDLE_KICK))
+            p = Projectile((x, 460.0), (0.0, -S))
+            for _ in range(20):
+                p.update(1 / 60)
+                gm._collide_projectile(p)
+            a = pd["angle"]
+            side = (-(p.pos.x - pd["x"]) * g.math.sin(a)
+                    + (p.pos.y - pd["y"]) * g.math.cos(a))
+            assert side > 0 and p.vel.y > 0, (turn, k)
+            assert abs(a) == g.math.radians(g.PADDLE_KICK), (turn, k)
+
+
 def test_paddle_spawns_from_its_wave_clear_of_bricks():
     seen_early = seen_late = 0
     for seed in range(200):
@@ -1440,6 +1462,56 @@ def test_wall_blocks_fast_steps():
                     gm._collide_walls(p)
                 assert (p.pos.y - 400.0) * direction < 0, (dt, direction, k)
                 assert wall["max_weight"] == 10**6 - 1  # exactly one bounce
+
+
+def test_wall_shields_brick_resting_on_it():
+    """A brick pinned on a wall is behind it: shots rising from below
+    bounce off the wall and never reach the brick."""
+    for k in range(40):
+        gm = _fresh_game()
+        gm.pickups, gm.paddles = [], []
+        brick = Brick(col=3, row=5, hp=50)
+        gm.bricks = [brick]
+        gm.brick_offset = 0.0
+        rect = g.cell_rect_full(3, 5, "square", gm._brick_off(brick))
+        wall = {"y": float(rect.bottom), "max_weight": 999, "grace": 0.0,
+                "ttl": 99.0}
+        gm.placed_walls = [wall]
+        p = Projectile((rect.centerx - 20 + k, rect.bottom + 60 + k * 0.37),
+                       (0.0, -g.PROJECTILE_SPEED))
+        for _ in range(20):
+            p.update(1 / 60)
+            gm._collide_projectile(p)
+        assert brick.hp == 50 and brick.shield_hit_t == 0, k
+        assert wall["max_weight"] == 998, k  # the wall took the one hit
+        assert p.vel.y > 0 and p.pos.y > wall["y"], k
+
+
+def test_bounces_restart_the_sweep():
+    """A bounce moves the ball, so later swept checks in the same frame
+    must start from where it now is, not from before this frame's move."""
+    gm = _fresh_game()
+    gm.pickups, gm.paddles = [], []
+    gm.placed_walls = [{"y": 400.0, "max_weight": 999, "grace": 0.0,
+                        "ttl": 99.0}]
+    p = Projectile((240.0, 420.0), (0.0, -g.PROJECTILE_SPEED))
+    p.update(1 / 20)  # a hitch step carries it past the wall line
+    gm._collide_walls(p)
+    assert p.prev == p.pos and p.pos.y > 400
+    gm.placed_walls = []
+    brick = Brick(col=3, row=5, hp=50)
+    gm.bricks = [brick]
+    gm.brick_offset = 0.0
+    rect = g.cell_rect_full(3, 5, "square", gm._brick_off(brick))
+    p = Projectile((rect.centerx, rect.bottom + 8), (0.0, -g.PROJECTILE_SPEED))
+    p.update(1 / 60)
+    gm._collide_bricks(p)
+    assert brick.hp == 49 and p.prev == p.pos
+    _paddle(gm, y=500.0)
+    p = Projectile((240.0, 520.0), (0.0, -g.PROJECTILE_SPEED))
+    p.update(1 / 30)
+    gm._collide_paddles(p)
+    assert p.vel.y > 0 and p.prev == p.pos
 
 
 def test_double_hp_spawns():

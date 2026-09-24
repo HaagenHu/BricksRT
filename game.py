@@ -758,17 +758,7 @@ class Game:
                     self._steer_homing(p, dt)
             if p.border_hits >= 10:
                 _apply_gravity(p, dt)
-            if p.alive:
-                self._collide_bricks(p)
-            if p.alive:
-                self._collide_pickups(p)
-            if p.alive:
-                self._collide_walls(p)
-            if p.alive and self.paddles:
-                self._collide_paddles(p)
-            if p.alive:
-                for placed, trigger in self._placed_aoe():
-                    self._collide_placed_aoe(p, placed, trigger)
+            self._collide_projectile(p)
 
         # Return ammo for projectiles that exited bottom (into reload queue).
         # Skull debt eats returning shots instead of refunding them.
@@ -1487,6 +1477,22 @@ class Game:
             self._emit("paddle_up")
             return
 
+    def _collide_projectile(self, p: Projectile):
+        """One frame of collisions for a live shot. Walls go first: they
+        are full-width static lines, and a brick resting on one must not
+        take a hit from a ball still on the wall's far side."""
+        if p.alive:
+            self._collide_walls(p)
+        if p.alive:
+            self._collide_bricks(p)
+        if p.alive:
+            self._collide_pickups(p)
+        if p.alive and self.paddles:
+            self._collide_paddles(p)
+        if p.alive:
+            for placed, trigger in self._placed_aoe():
+                self._collide_placed_aoe(p, placed, trigger)
+
     def _collide_paddles(self, p: Projectile):
         """Mirror bounce off either face. Swept along the ball's path
         this frame (p.prev -> p.pos), so a fast shot can't tunnel through
@@ -1513,13 +1519,19 @@ class Game:
                 continue
             p.vel.x -= 2 * vn * nx
             p.vel.y -= 2 * vn * ny
+            if pd.get("kind") == "kick":
+                # Turn first, then set the ball off the TURNED bar: out at
+                # the tips the bar swings further than the ball's gap and
+                # would end up past it (a tunnel next frame)
+                pd["angle"] += pd["turn"]
+                ux, uy = math.cos(pd["angle"]), math.sin(pd["angle"])
+                nx, ny = -uy, ux
             t = max(-h, min(h, t1))
             p.pos.x = pd["x"] + ux * t + nx * side * (r + 1)
             p.pos.y = pd["y"] + uy * t + ny * side * (r + 1)
+            p.prev.update(p.pos)  # sweep restarts from the bounce
             p.border_hits += 1  # counts toward the anti-loop gravity
             pd["flash"] = PADDLE_FLASH_TIME
-            if pd.get("kind") == "kick":
-                pd["angle"] += pd["turn"]
             return
 
     def _update_paddles(self, dt: float):
@@ -1870,6 +1882,9 @@ class Game:
                     hit = self._collide_rect(proj, brick, off)
 
                 if hit:
+                    # The bounce moved the ball: later swept checks this
+                    # frame start from here, not from before the move
+                    proj.prev.update(proj.pos)
                     brick.hit_t = HIT_FLASH_TIME
                     if brick.shield > 0 and self._shield_absorbs(
                             brick, off, pre_vel_x, pre_vel_y, proj):
@@ -2183,6 +2198,7 @@ class Game:
                 proj._min_rebound("y", 1)
             else:
                 continue
+            proj.prev.update(proj.pos)  # sweep restarts from the bounce
             proj.border_hits = 0
             # Each bounce chips the wall: its weight capacity drops by 1,
             # so bouncing your own shots off a wall shortens its life.

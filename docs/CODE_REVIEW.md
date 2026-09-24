@@ -13,9 +13,9 @@ findings were confirmed with headless simulations (below).
 
 | # | Severity | Area | Finding | Status |
 |---|----------|------|---------|--------|
-| 1 | High | Walls | Bricks resting on a wall get hit *through* it | Open |
-| 2 | High | Paddles | Kick paddles let tip hits pass through | Open |
-| 3 | Medium | Collisions | Swept checks use a stale `prev` after a relocation | Open |
+| 1 | High | Walls | Bricks resting on a wall get hit *through* it | Fixed |
+| 2 | High | Paddles | Kick paddles let tip hits pass through | Fixed |
+| 3 | Medium | Collisions | Swept checks use a stale `prev` after a relocation | Fixed |
 | 4 | Medium | Paddles | Overrun test uses the full cell, not the brick's shape | Open |
 | 5 | Low | Paddles | Spawn ignores walls, pickups, AoE icons, mines | Open |
 | 6 | Low | Render | Paddle help icon doesn't use the `_bar` helper | Open |
@@ -43,6 +43,10 @@ the brick was damaged 35/40 times, the wall chipped only 5/40.
 **Fix:** resolve walls (static, full-width geometry) before brick
 collisions in the projectile loop.
 
+**Fixed:** the per-shot collisions moved into `_collide_projectile`,
+walls first. `test_wall_shields_brick_resting_on_it` fails on the old
+order and passes now (0/40 brick hits).
+
 ### 2. Kick paddles let tip hits pass through — High
 
 `game.py:1522` — a kick paddle turns 15° right after a bounce.
@@ -59,6 +63,10 @@ direction ended above the paddle (the outer tips).
 **Fix:** after kicking, re-place the ball `r + 1` px off the rotated
 line (or skip the swept test for that paddle on the ball's next frame).
 
+**Fixed:** the kicker turns first and the ball is then placed `r + 1`
+off the turned bar. `test_kick_paddle_tips_hold` (35 shots tip to tip,
+both kick directions) fails on the old code and passes now.
+
 ### 3. Swept checks use a stale `prev` after a relocation — Medium
 
 `game.py:1501` (paddles) and `game.py:2173` (walls) sweep along
@@ -71,6 +79,10 @@ wrong side.
 **Fix:** set `p.prev` to `p.pos` after every positional correction
 (brick, wall, paddle), or resolve static geometry before bricks
 (see #1) so relocations happen last.
+
+**Fixed:** both — walls now go first (#1), and every brick, wall and
+paddle bounce resets `prev` to the ball's new position
+(`test_bounces_restart_the_sweep`).
 
 ### 4. Paddle overrun uses the full cell, not the brick's shape — Medium
 

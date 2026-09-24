@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.1 — Collision fixes from the code review (2026-09-24)
+
+- **Walls shield the bricks resting on them**: walls are now checked
+  before bricks, so a shot rising into a wall bounces off it instead of
+  hitting the brick pinned on top (before: 35 of 40 such shots went
+  "through" the wall)
+- **Kick paddles hold at the tips**: the kicker turns first and the
+  ball is then set off the turned bar — tip hits no longer end up on
+  the far side
+- **Swept checks restart after a bounce**: a brick, wall or paddle
+  bounce resets the ball's sweep start, so a later check in the same
+  frame can't see a crossing the ball never made
+- **Code review** written down in `docs/CODE_REVIEW.md` (8 findings;
+  the 3 above fixed, 5 minor ones open)
+
 ## v0.7.0 — Turret control, paddles, shapes, wall fix (2026-09-24)
 
 ### Controls
