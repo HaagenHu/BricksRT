@@ -12,13 +12,15 @@
   tunnel through; each deflection counts toward the anti-loop gravity;
   spent shells pass through. New cues for appearing and breaking; a
   FIELD row on the help screen
-- **Rounded shields on up/left/right triangles**: their band now wraps
-  around the end corners with rounded bends like the other shapes
-  (was a plain edge). Downward triangles go the other way: a plain V
-  (rounded point, no curl) — their underside ends at the top corners,
-  with nothing below to wrap around. Only they and round bricks stay
-  plain. Protection follows the band, so e.g. a low hit on a slant or
-  flat side near a wrapped bottom corner is shielded
+- **Shield band per shape, reworked** (protection follows the band):
+  - Up/left/right triangles now wrap around their end corners with
+    rounded bends like squares, diamonds, hexagons and upright
+    trapezoids (they were a plain edge)
+  - **Half bands**: downward triangles and downward trapezoids stop at
+    the brick's center line, no curl (they used to wrap over the top
+    corners — the whole slant was covered); round bricks cover exactly
+    the lower half (was 0.3 rad short of the center line at each end).
+    Hits on the upper half of those faces now go to hp
 - **Fix: shots leaked through walls** — ~28% at 60 fps, ~64% on a
   30 fps hitch. The wall only caught a ball inside a thin band and
   judged the bounce by which side the ball was on *now*; a 10-20px

@@ -87,8 +87,9 @@ Reuse all shapes from Bricks:
   bricks spawn at wave − 55)
 - Shields (bottom protection): a bounce hits the shield if it lands
   on a downward-facing face, or within 9px of the corners where the
-  band wraps (all shapes but round and downward triangles) — the
-  drawn band is exactly the protected area
+  band wraps (all shapes but round and the downward triangle and
+  trapezoid). Those three are half bands: covered only up to the
+  brick's center line. The drawn band is exactly the protected area
 - Merging (wave 70+): a spawning square can fuse with the square below it
   into a tall brick with combined HP
 - Rainbow color gradient by HP

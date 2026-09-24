@@ -514,6 +514,14 @@ def test_shield_covers_its_band():
     """Shields block exactly where the band is drawn: downward faces,
     plus the wrap around the end corners on wrapping shapes."""
     R, S = g.PROJECTILE_RADIUS, g.PROJECTILE_SPEED
+    tri_n = (2 / 5 ** 0.5, 1 / 5 ** 0.5)        # tri-down right face
+    trap_n = (2 / 4.16 ** 0.5, 0.4 / 4.16 ** 0.5)  # trap-down right face
+    # name -> (point on the face in half-size units, its outward normal)
+    FACE_POINTS = {
+        "tri_upper": ((0.75, -0.5), tri_n), "tri_lower": ((0.25, 0.5), tri_n),
+        "trap_upper": ((0.9, -0.5), trap_n),
+        "trap_lower": ((0.7, 0.5), trap_n),
+    }
 
     def strike(shape, tri_dir, where):
         """Fire one ball at the brick; 'shield' or 'hp' took the hit."""
@@ -535,9 +543,9 @@ def test_shield_covers_its_band():
             pos, vel = (right + R - 1, full.bottom - 4), (-S, 0)
         elif where == "side_mid":   # into the right side, halfway up
             pos, vel = (right + R - 1, cy), (-S, 0)
-        elif where == "upper_slant":  # tri-down right face, above center
-            n = (2 / 5 ** 0.5, 1 / 5 ** 0.5)  # its outward normal
-            px, py = cx + 0.75 * h, cy - 0.5 * h
+        elif where in FACE_POINTS:  # into a face, along its normal
+            (fx, fy), n = FACE_POINTS[where]
+            px, py = cx + fx * h, cy + fy * h
             pos = (px + n[0] * (R - 1), py + n[1] * (R - 1))
             vel = (-n[0] * S, -n[1] * S)
         p = Projectile(pos, vel)
@@ -551,9 +559,14 @@ def test_shield_covers_its_band():
     assert strike("square", "up", "top") == "hp"
     assert strike("round", "up", "below") == "shield"
     assert strike("round", "up", "side_mid") == "hp"
-    # Downward triangle: the whole V is covered now, not just below center
-    assert strike("triangle", "down", "upper_slant") == "shield"
+    # Downward triangle / trapezoid: the band stops at the center line,
+    # so only the lower half of the slanted faces is covered
+    assert strike("triangle", "down", "tri_lower") == "shield"
+    assert strike("triangle", "down", "tri_upper") == "hp"
     assert strike("triangle", "down", "top") == "hp"
+    assert strike("trapezoid", "down", "trap_lower") == "shield"
+    assert strike("trapezoid", "down", "trap_upper") == "hp"
+    assert strike("trapezoid", "down", "below") == "shield"
     # Left-pointing triangle: its band wraps up the right side at the
     # bottom corner now, so a side hit low on that edge is shielded,
     # one halfway up is not
@@ -564,7 +577,9 @@ def test_shield_covers_its_band():
     assert strike("triangle", "up", "side_low") == "shield"
     for d in ("up", "left", "right"):
         assert g.shield_wraps("triangle", d), d
-    assert not g.shield_wraps("triangle", "down")
+    assert g.shield_wraps("trapezoid", "up")
+    for s in ("triangle", "trapezoid"):
+        assert not g.shield_wraps(s, "down") and g.shield_half(s, "down")
     assert not g.shield_wraps("round", "up")
 
 

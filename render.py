@@ -16,7 +16,8 @@ from game import (
     LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME, SHIELD_HIT_TIME,
     PADDLE_LIFE, PADDLE_LEN, PADDLE_FLASH_TIME, PADDLE_COLOR,
     Brick, Game, cell_rect, make_shards, step_shards,
-    shape_points, shield_wraps, down_faces, SHIELD_CURL, SHIELD_ROUND_ARC,
+    shape_points, shield_wraps, shield_half, down_faces, SHIELD_CURL,
+    SHIELD_ROUND_ARC,
 )
 
 # UI typeface: first installed name wins (Bahnschrift ships with
@@ -495,11 +496,29 @@ def _round_bends(pts: list[tuple[float, float]],
     return out
 
 
-def _wrap_underside(poly: list[tuple[float, float]],
-                    curl: bool = True) -> list[tuple[float, float]]:
+def _clip_below(pts: list[tuple[float, float]],
+                y0: float) -> list[tuple[float, float]]:
+    """The part of a polyline at or below y0 (screen y >= y0), cut
+    exactly where it crosses — the half-band shapes' center line."""
+    out: list[tuple[float, float]] = []
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        if y1 >= y0 and not out:
+            out.append((x1, y1))
+        if (y1 - y0) * (y2 - y0) < 0:  # crosses the line
+            t = (y0 - y1) / (y2 - y1)
+            out.append((x1 + (x2 - x1) * t, y0))
+        if y2 >= y0:
+            out.append((x2, y2))
+    return out
+
+
+def _wrap_underside(poly: list[tuple[float, float]], curl: bool = True,
+                    clip_y: float | None = None
+                    ) -> list[tuple[float, float]]:
     """The run of a convex outline's downward-facing edges, bends
     rounded; with curl, continued SHIELD_CURL px around the corner at
-    each end, so the band cups the brick the way it does on squares."""
+    each end, so the band cups the brick the way it does on squares;
+    with clip_y, cut off above that line (no curl)."""
     n = len(poly)
     down = down_faces(poly)
     start = next(i for i in range(n) if down[i] and not down[i - 1])
@@ -515,6 +534,8 @@ def _wrap_underside(poly: list[tuple[float, float]],
         return (corner[0] + (toward[0] - corner[0]) * k,
                 corner[1] + (toward[1] - corner[1]) * k)
 
+    if clip_y is not None:
+        return _round_bends(_clip_below(chain, clip_y))
     if not curl:
         return _round_bends(chain)
     head = extend(chain[0], poly[(start - 1) % n])
@@ -526,7 +547,8 @@ def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
                  gap: float = SHIELD_GAP) -> list[tuple[float, float]]:
     """Polyline of the downward-facing edges, pushed `gap` px out. Most
     shapes cup the brick (wrapping around their end corners); round
-    bricks and downward triangles (a plain V) don't wrap."""
+    bricks don't wrap, and downward triangles / trapezoids stop at the
+    center line (shield_half)."""
     cx, cy = rect.center
     h = BRICK_SIZE / 2 + gap
     if shape == "round":  # lower arc between the SHIELD_ROUND_ARC angles
@@ -539,7 +561,8 @@ def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
     else:  # diamond, hexagon, triangles, trapezoids
         poly = shape_points(shape, tri_dir, cx, cy, h)
     return _wrap_underside([(float(x), float(y)) for x, y in poly],
-                           curl=shield_wraps(shape, tri_dir))
+                           curl=shield_wraps(shape, tri_dir),
+                           clip_y=cy if shield_half(shape, tri_dir) else None)
 
 
 def _along(pts: list[tuple[float, float]],

@@ -396,15 +396,22 @@ def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
 # the end corners on shapes whose band wraps (shield_wraps)
 SHIELD_CURL = 9            # px the band wraps around each end corner
 SHIELD_FACE_DOWN = 0.05    # min downward part of a face's unit normal
-SHIELD_ROUND_ARC = 0.3     # rad: a round brick's band spans 0.3..pi-0.3
+SHIELD_ROUND_ARC = 0.0     # rad: a round brick's band spans a..pi-a;
+                           # 0 = the whole lower half, center line to
+                           # center line, like the half-band shapes
+
+
+def shield_half(shape: str, tri_dir: str) -> bool:
+    """Downward triangles and trapezoids: their downward faces run all the
+    way up to the top corners, so the band stops at the center line
+    instead (no curl) — only the lower half of those faces is covered."""
+    return shape in ("triangle", "trapezoid") and tri_dir == "down"
 
 
 def shield_wraps(shape: str, tri_dir: str) -> bool:
     """Does the shield band wrap around its end corners? Not on round
-    bricks, nor on downward triangles: their underside is a V that ends
-    at the top corners, with nothing below to wrap around."""
-    return not (shape == "round"
-                or (shape == "triangle" and tri_dir == "down"))
+    bricks, nor on the half-band shapes (shield_half)."""
+    return not (shape == "round" or shield_half(shape, tri_dir))
 
 
 def down_faces(poly: list[tuple[float, float]]) -> list[bool]:
@@ -1913,13 +1920,16 @@ class Game:
         nx, ny = nx / d, ny / d
         if brick.shape == "round":
             return ny > math.sin(SHIELD_ROUND_ARC)
+        # Contact point: the bounce left the ball just off the surface
+        px = proj.pos.x - nx * (PROJECTILE_RADIUS + 1)
+        py = proj.pos.y - ny * (PROJECTILE_RADIUS + 1)
+        if shield_half(brick.shape, brick.tri_dir):
+            center_y = cell_rect(brick.col, brick.row, "square", off).centery
+            return ny > SHIELD_FACE_DOWN and py >= center_y
         if ny > SHIELD_FACE_DOWN:
             return True
         if not shield_wraps(brick.shape, brick.tri_dir):
             return False
-        # Contact point: the bounce left the ball just off the surface
-        px = proj.pos.x - nx * (PROJECTILE_RADIUS + 1)
-        py = proj.pos.y - ny * (PROJECTILE_RADIUS + 1)
         poly = brick_outline(brick, off)
         down = down_faces(poly)
         corners = [poly[i] for i in range(len(poly)) if down[i] != down[i - 1]]
