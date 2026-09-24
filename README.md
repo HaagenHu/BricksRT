@@ -57,8 +57,8 @@ py main.py
 ```
 
 Practice start for testing — jump to a wave with a matching arsenal
-(~one ball per wave, 3 of each unlocked ammo type); records no
-highscore:
+(the balls a perfect run would have collected by then, ~80% of the
+wave number, plus 3 of each unlocked ammo type); records no highscore:
 
 ```
 py main.py --wave 100

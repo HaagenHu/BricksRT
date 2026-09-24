@@ -3,7 +3,9 @@
 ## Unreleased
 
 - **Practice start** (`py main.py --wave N`): jump to wave N with a
-  matching arsenal — N balls and 3 of each unlocked ammo type — for
+  matching arsenal — the balls a perfect run would hold by then (1 +
+  one per earlier non-5th wave, ~80% of N) and 3 of each unlocked
+  ammo type — for
   testing late-game content; marked PRACTICE in the HUD and never
   records a highscore
 - Bigger extra-ball "+" and brick HP numbers (numbers shrink only when

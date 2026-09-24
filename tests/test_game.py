@@ -485,7 +485,8 @@ def test_practice_start():
     gm.start(60)
     assert gm.practice and gm.wave == 60
     assert gm.bricks and all(b.hp >= 60 for b in gm.bricks)  # wave HP
-    assert gm.gun_ammo == 60
+    # 1 starting ball + one per earlier non-5th wave: 59 - 11 + 1
+    assert gm.gun_ammo == 49
     for t in g.AMMO_TYPES:  # stock of exactly the types unlocked by 60
         expect = g.PRACTICE_STOCK if 60 >= g.PICKUP_UNLOCK[t] else 0
         assert gm.ammo_inv[t] == expect, t

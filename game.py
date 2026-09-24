@@ -463,16 +463,20 @@ class Game:
 
     def start(self, start_wave: int = 1):
         """New run. start_wave > 1 is a practice start for testing: it
-        jumps to that wave with a comparable arsenal (a run that got
-        there would have ~one ball per wave and some stock of every
-        unlocked type) and never records a highscore."""
+        jumps to that wave with a comparable arsenal and never records a
+        highscore. Balls = what a perfect run would hold on arrival: the
+        starting ball plus one per earlier wave that spawns an extra
+        ball (all but every 5th, i.e. 80%); plus some stock of every
+        unlocked type."""
         self.reset()
         self.phase = "playing"
         self.gun_cooldown = 0.5  # aim delay before first shot
         if start_wave > 1:
             self.practice = True
             self.wave = start_wave - 1  # spawn_wave steps onto it
-            self.gun_ammo = start_wave
+            passed = start_wave - 1
+            self.gun_ammo = (STARTING_GUN_AMMO
+                             + (passed - passed // 5) * AMMO_PER_PICKUP)
             for t in AMMO_TYPES:
                 if start_wave >= PICKUP_UNLOCK[t]:
                     self.ammo_inv[t] = PRACTICE_STOCK
