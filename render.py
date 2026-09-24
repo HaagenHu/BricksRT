@@ -495,11 +495,11 @@ def _round_bends(pts: list[tuple[float, float]],
     return out
 
 
-def _wrap_underside(poly: list[tuple[float, float]]
-                    ) -> list[tuple[float, float]]:
-    """The run of a convex outline's downward-facing edges, continued
-    SHIELD_CURL px around the corner at each end, bends rounded: the
-    band cups the brick the way it does on squares."""
+def _wrap_underside(poly: list[tuple[float, float]],
+                    curl: bool = True) -> list[tuple[float, float]]:
+    """The run of a convex outline's downward-facing edges, bends
+    rounded; with curl, continued SHIELD_CURL px around the corner at
+    each end, so the band cups the brick the way it does on squares."""
     n = len(poly)
     down = down_faces(poly)
     start = next(i for i in range(n) if down[i] and not down[i - 1])
@@ -509,36 +509,37 @@ def _wrap_underside(poly: list[tuple[float, float]]
         chain.append(poly[(j + 1) % n])
         j += 1
 
-    def curl(corner, toward):
+    def extend(corner, toward):
         d = math.hypot(toward[0] - corner[0], toward[1] - corner[1])
         k = min(SHIELD_CURL, d / 2) / d
         return (corner[0] + (toward[0] - corner[0]) * k,
                 corner[1] + (toward[1] - corner[1]) * k)
 
-    head = curl(chain[0], poly[(start - 1) % n])
-    tail = curl(chain[-1], poly[(j + 1) % n])
+    if not curl:
+        return _round_bends(chain)
+    head = extend(chain[0], poly[(start - 1) % n])
+    tail = extend(chain[-1], poly[(j + 1) % n])
     return _round_bends([head] + chain + [tail])
 
 
 def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
                  gap: float = SHIELD_GAP) -> list[tuple[float, float]]:
     """Polyline of the downward-facing edges, pushed `gap` px out. Most
-    shapes cup the brick (wrapping around their end corners); round and
-    upward triangles keep a plain edge."""
+    shapes cup the brick (wrapping around their end corners); round
+    bricks and downward triangles (a plain V) don't wrap."""
     cx, cy = rect.center
     h = BRICK_SIZE / 2 + gap
     if shape == "round":  # lower arc between the SHIELD_ROUND_ARC angles
         a0, span = SHIELD_ROUND_ARC, math.pi - 2 * SHIELD_ROUND_ARC
         return [(cx + h * math.cos(a0 + span * k / 12),
                  cy + h * math.sin(a0 + span * k / 12)) for k in range(13)]
-    if not shield_wraps(shape, tri_dir):  # upward triangle: plain base
-        return [(cx - h, cy + h), (cx + h, cy + h)]
     if shape in ("square", "wide", "tall"):
         r = rect.inflate(2 * gap, 2 * gap)
         poly = [r.topleft, r.topright, r.bottomright, r.bottomleft]
-    else:  # diamond, hexagon, down/left/right triangles, trapezoids
+    else:  # diamond, hexagon, triangles, trapezoids
         poly = shape_points(shape, tri_dir, cx, cy, h)
-    return _wrap_underside([(float(x), float(y)) for x, y in poly])
+    return _wrap_underside([(float(x), float(y)) for x, y in poly],
+                           curl=shield_wraps(shape, tri_dir))
 
 
 def _along(pts: list[tuple[float, float]],

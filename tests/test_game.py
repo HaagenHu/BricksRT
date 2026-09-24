@@ -559,9 +559,13 @@ def test_shield_covers_its_band():
     # one halfway up is not
     assert strike("triangle", "left", "side_low") == "shield"
     assert strike("triangle", "left", "side_mid") == "hp"
-    assert g.shield_wraps("triangle", "left")
-    assert g.shield_wraps("triangle", "right")
-    assert not g.shield_wraps("triangle", "up")
+    # Upward triangle wraps up its slants at the bottom corners; the
+    # downward one is a plain V (nothing below its top corners to wrap)
+    assert strike("triangle", "up", "side_low") == "shield"
+    for d in ("up", "left", "right"):
+        assert g.shield_wraps("triangle", d), d
+    assert not g.shield_wraps("triangle", "down")
+    assert not g.shield_wraps("round", "up")
 
 
 def test_shield_flash_and_break():

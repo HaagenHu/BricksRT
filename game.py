@@ -401,9 +401,10 @@ SHIELD_ROUND_ARC = 0.3     # rad: a round brick's band spans 0.3..pi-0.3
 
 def shield_wraps(shape: str, tri_dir: str) -> bool:
     """Does the shield band wrap around its end corners? Not on round
-    bricks or upward triangles (their band is a plain edge)."""
+    bricks, nor on downward triangles: their underside is a V that ends
+    at the top corners, with nothing below to wrap around."""
     return not (shape == "round"
-                or (shape == "triangle" and tri_dir == "up"))
+                or (shape == "triangle" and tri_dir == "down"))
 
 
 def down_faces(poly: list[tuple[float, float]]) -> list[bool]:
