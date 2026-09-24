@@ -128,6 +128,9 @@ TARSHOT_SLOW = 0.15     # slow added per tar-bullet hit (stacks to 1.0)
 TARSHOT_TIME = 3.0      # slow lasts this long after the LAST hit
 ACIDSHOT_DOT = 3.0      # seconds of burn after an acid-bullet hit
 ACIDSHOT_DPS = 2.0      # burn damage per second (1 per tick, shield first)
+ACID_SHIELD_MULT = 2    # acid (burn and pool) hits shields this much harder
+                        # than hp; a tick that finishes a shield doesn't
+                        # spill onto hp
 # Acid and mine bullets deliver their payload on the first brick they
 # hit, then drop straight down as spent shells (no more collisions) and
 # return to the pool off the bottom like any ball
@@ -781,7 +784,8 @@ class Game:
                 while b.acid_tick >= tick:
                     b.acid_tick -= tick
                     if b.shield > 0:
-                        b.shield -= 1  # melts armor before flesh
+                        # Melts armor before flesh, and faster
+                        b.shield = max(0, b.shield - ACID_SHIELD_MULT)
                         continue
                     b.hp -= 1
                     if b.hp <= 0:
@@ -2236,8 +2240,9 @@ class Game:
                     cy = max(rect.top, min(acid["y"], rect.bottom))
                     if math.hypot(cx - acid["x"], cy - acid["y"]) < acid_px:
                         if brick.shield > 0:
-                            # Acid melts armor before flesh
-                            brick.shield = max(0, brick.shield - damage)
+                            # Acid melts armor before flesh, and faster
+                            brick.shield = max(
+                                0, brick.shield - damage * ACID_SHIELD_MULT)
                         else:
                             brick.hp -= damage
                             if brick.hp <= 0:

@@ -1629,7 +1629,7 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(pickup("tar"),
         f"Tar — slow zone 8s / slow 15% per hit (wave {UNLOCK['tar']}+)")
     row(pickup("acid"),
-        f"Acid — melts shields then hp / 2/s burn (wave {UNLOCK['acid']}+)")
+        f"Acid — 2x vs shields, then hp / 2/s burn (wave {UNLOCK['acid']}+)")
     row(pickup("homing"),
         f"Homing — rocket / steering shots (wave {UNLOCK['homing']}+)")
 

@@ -51,7 +51,7 @@ first stocked type.
 | Wall | Barrier holding the field until overloaded | Full stop on hit brick, 2s | 20 |
 | Bomb | Explodes at target, area damage, halves shields | Fire bullet: pierces through bricks, chips 1 shield per pass | 30 |
 | Tar | Zone halving brick advance speed, 8s | +15% slow per hit, stacks to a stop, 3s from last hit | 40 |
-| Acid | Area DoT zone, 5s — melts shields before hp | Acid burn: 2/s for 3s, shield first (shield glows green); the ball drops as a spent shell | 60 |
+| Acid | Area DoT zone, 5s — melts shields before hp, at 2x | Acid burn: 2/s for 3s, shield first at 2x (shield glows green); the ball drops as a spent shell | 60 |
 | Homing | Rocket: flies to the brick nearest the gun and explodes on it | Shots steer toward the nearest brick, 10s | 100 |
 
 - Panic mortar (Q): fires one shell of each stocked mortar-capable

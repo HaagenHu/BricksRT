@@ -26,6 +26,10 @@
 - **Acid bullet burn doubled** to 2 damage/s (3s, 6 total), shields
   first; a shield being eaten by acid (bullet burn or pool) glows
   acid-green and throws green sparks
+- **Acid is twice as effective on shields as on hp** (burn and pool):
+  a burn tick takes 2 shield points (or 1 hp); a pool tick takes
+  2 x (wave / 10) shield points. A tick that finishes a shield still
+  doesn't spill onto hp
 - **New shape — upside-down trapezoid**: trapezoids now come in an
   up/down pair like the triangles (narrow top / narrow base), chosen
   50/50 from wave 30; collision follows the orientation

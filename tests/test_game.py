@@ -1152,21 +1152,30 @@ def test_effects_damage_shields():
     hp1 = b.hp
     gm._collide_bricks(p)
     assert b.hp == hp1 - 1 and b.shield == 3
-    # Acid zone tick melts shield BEFORE hp (wave 20 -> 2 per tick)
+    # Acid zone tick melts shield BEFORE hp, at double rate against
+    # shields (wave 20 -> 2 per tick -> 4 off the shield)
     gm.placed_acids = [{"x": rect.centerx, "y": rect.centery,
                         "timer": 5.0, "tick": 0.0}]
+    b.shield = 5
     hp2 = b.hp
     gm._update_acids(0.01)
-    assert b.shield == 1 and b.hp == hp2
-    # Acid-bullet DoT: shield absorbs the tick, then hp burns
-    b.shield = 1
+    assert b.shield == 5 - 2 * g.ACID_SHIELD_MULT and b.hp == hp2
+    gm.placed_acids[0]["tick"] = 0.0
+    gm._update_acids(0.01)  # 1 left: finishing it doesn't spill onto hp
+    assert b.shield == 0 and b.hp == hp2
+    # Acid-bullet burn: each tick takes ACID_SHIELD_MULT off the shield,
+    # then 1 hp per tick once it's gone
+    b.shield = 3
     b.acid_dot = g.ACIDSHOT_DOT
     b.acid_tick = 0.0
     gm.placed_acids.clear()
     hp3 = b.hp
     for _ in range(70):  # ~1.17s at 2 ticks/s -> two ticks (3rd at 1.5s)
         gm.update(1 / 60)
-    assert b.shield == 0 and b.hp == hp3 - 1
+    assert b.shield == 0 and b.hp == hp3  # 3 -> 1 -> 0: both ticks on it
+    for _ in range(30):  # +0.5s: the third tick reaches hp
+        gm.update(1 / 60)
+    assert b.hp == hp3 - 1
 
 
 def test_homing_rocket_hits_nearest_to_gun():
