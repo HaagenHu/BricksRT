@@ -1,4 +1,10 @@
-"""BricksRT — Real-time brick breaker with continuous advancement."""
+"""BricksRT — Real-time brick breaker with continuous advancement.
+
+    py main.py             normal game
+    py main.py --wave 60   practice start at wave 60 (testing; no highscore)
+"""
+
+import argparse
 
 import pygame
 
@@ -10,7 +16,7 @@ AMMO_KEYS = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3,
              pygame.K_5: 4, pygame.K_6: 5}
 
 
-def main():
+def main(start_wave: int = 1):
     sound.pre_init()  # mixer settings must precede pygame.init()
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -44,7 +50,7 @@ def main():
                     if show_help:
                         show_help = False
                     elif play_rect and play_rect.collidepoint(mx, my):
-                        game.start()
+                        game.start(start_wave)
                     elif help_rect and help_rect.collidepoint(mx, my):
                         show_help = True
                 elif game.phase == "gameover":
@@ -101,7 +107,7 @@ def main():
                 draw_help(screen, font, small_font)
             else:
                 play_rect, help_rect = draw_menu(screen, font, small_font,
-                                                 game.highscore)
+                                                 game.highscore, start_wave)
             pygame.display.flip()
             continue
 
@@ -121,4 +127,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="BricksRT")
+    parser.add_argument("--wave", type=int, default=1, metavar="N",
+                        help="practice start at wave N with a matching "
+                             "arsenal (for testing; records no highscore)")
+    args = parser.parse_args()
+    main(max(1, args.wave))

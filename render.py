@@ -1159,7 +1159,12 @@ def draw_game(screen: pygame.Surface, game: Game,
     lbl = small_font.render("WAVE", True, HUD_LABEL)
     num = font.render(str(game.wave), True, TEXT_COLOR)
     screen.blit(lbl, lbl.get_rect(midleft=(12, mid + 1)))
-    screen.blit(num, num.get_rect(midleft=(12 + lbl.get_width() + 8, mid)))
+    num_rect = num.get_rect(midleft=(12 + lbl.get_width() + 8, mid))
+    screen.blit(num, num_rect)
+    if game.practice:  # skipped waves: this run can't set a record
+        tag = _ui_font(13, bold=False).render("PRACTICE", True,
+                                              CROSSHAIR_COLOR)
+        screen.blit(tag, tag.get_rect(midleft=(num_rect.right + 12, mid + 1)))
     num = font.render(str(game.highscore), True, TEXT_COLOR)
     num_rect = num.get_rect(midright=(WIDTH - 12, mid))
     lbl = small_font.render("BEST", True, HUD_LABEL)
@@ -1354,9 +1359,10 @@ def _draw_menu_bricks(screen: pygame.Surface, now: float):
 
 
 def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
-              small_font: pygame.font.Font,
-              highscore: int) -> tuple[pygame.Rect, pygame.Rect]:
-    """Returns (play button rect, help button rect)."""
+              small_font: pygame.font.Font, highscore: int,
+              start_wave: int = 1) -> tuple[pygame.Rect, pygame.Rect]:
+    """Returns (play button rect, help button rect). start_wave > 1
+    notes the practice start (main.py --wave)."""
     now = pygame.time.get_ticks() / 1000.0
     screen.blit(_nebula(), (0, 0))
     draw_starfield(screen, now, 0, HEIGHT)
@@ -1376,6 +1382,11 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
     help_rect = pygame.Rect(WIDTH // 2 - 60, HEIGHT // 2 + 44, 120, 36)
     _button(screen, help_rect, "HELP", small_font, (45, 45, 70),
             (150, 150, 180))
+
+    if start_wave > 1:  # above PLAY: what the button will start
+        pr = small_font.render(f"Practice start: wave {start_wave}", True,
+                               CROSSHAIR_COLOR)
+        screen.blit(pr, pr.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 48)))
 
     if highscore > 0:
         hs_txt = small_font.render(f"Best: Wave {highscore}", True, (150, 150, 180))

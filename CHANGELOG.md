@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Practice start** (`py main.py --wave N`): jump to wave N with a
+  matching arsenal — N balls and 3 of each unlocked ammo type — for
+  testing late-game content; marked PRACTICE in the HUD and never
+  records a highscore
+- Bigger extra-ball "+" and brick HP numbers (numbers shrink only when
+  they'd overflow a triangle or diamond); roomier help screen
+
 ## v0.5.1 — Sound effects (2026-09-24)
 
 - **Sound**: 15 procedural cues, synthesized at startup in plain

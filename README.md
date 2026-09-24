@@ -56,6 +56,14 @@ pip install -r requirements.txt
 py main.py
 ```
 
+Practice start for testing — jump to a wave with a matching arsenal
+(~one ball per wave, 3 of each unlocked ammo type); records no
+highscore:
+
+```
+py main.py --wave 100
+```
+
 ## Tests
 
 ```

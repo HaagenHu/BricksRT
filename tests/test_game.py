@@ -480,6 +480,24 @@ def test_sound_player():
         pygame.mixer.quit()
 
 
+def test_practice_start():
+    gm = Game()
+    gm.start(60)
+    assert gm.practice and gm.wave == 60
+    assert gm.bricks and all(b.hp >= 60 for b in gm.bricks)  # wave HP
+    assert gm.gun_ammo == 60
+    for t in g.AMMO_TYPES:  # stock of exactly the types unlocked by 60
+        expect = g.PRACTICE_STOCK if 60 >= g.PICKUP_UNLOCK[t] else 0
+        assert gm.ammo_inv[t] == expect, t
+    # Never records a highscore, however far it gets
+    gm.highscore = 5
+    gm.save_if_record()
+    assert gm.highscore == 5 and not gm.new_best
+    # A normal start clears practice mode
+    gm.start()
+    assert not gm.practice and gm.wave == 1
+
+
 def test_gun_kick_on_fire():
     gm = _fresh_game(wave=1)
     gm.gun_cooldown = 0

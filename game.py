@@ -56,6 +56,7 @@ GUN_COOLDOWN = 0.12  # seconds between shots
 GUN_BARREL_LEN = 40  # px — shots launch from the barrel tip
 GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
 STARTING_GUN_AMMO = 1
+PRACTICE_STOCK = 3  # units of each unlocked ammo type on a practice start
 AMMO_PER_PICKUP = 1
 
 # Volley: surplus ammo converts to shots per trigger (small spread).
@@ -379,6 +380,7 @@ class Game:
     def reset(self):
         self.phase = "menu"  # menu | playing | paused | gameover
         self.wave = 0
+        self.practice = False  # practice start: no highscore
         self.game_time = 0.0
         self.highscore = load_highscore("realtime")
         self.new_best = False
@@ -459,14 +461,28 @@ class Game:
         # Advance speed
         self.advance_speed = ADVANCE_SPEED_BASE
 
-    def start(self):
+    def start(self, start_wave: int = 1):
+        """New run. start_wave > 1 is a practice start for testing: it
+        jumps to that wave with a comparable arsenal (a run that got
+        there would have ~one ball per wave and some stock of every
+        unlocked type) and never records a highscore."""
         self.reset()
         self.phase = "playing"
         self.gun_cooldown = 0.5  # aim delay before first shot
+        if start_wave > 1:
+            self.practice = True
+            self.wave = start_wave - 1  # spawn_wave steps onto it
+            self.gun_ammo = start_wave
+            for t in AMMO_TYPES:
+                if start_wave >= PICKUP_UNLOCK[t]:
+                    self.ammo_inv[t] = PRACTICE_STOCK
         self.spawn_wave()
 
     def save_if_record(self):
-        """Persist the highscore if the current run beats it."""
+        """Persist the highscore if the current run beats it (never for
+        practice runs — they skip the waves that earn it)."""
+        if self.practice:
+            return
         if self.wave > self.highscore:
             self.highscore = self.wave
             self.new_best = True
