@@ -524,23 +524,19 @@ def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
                  gap: float = SHIELD_GAP) -> list[tuple[float, float]]:
     """Polyline of the downward-facing edges, pushed `gap` px out. Most
     shapes cup the brick (wrapping around their end corners); round and
-    the up/left/right triangles keep a plain edge."""
+    upward triangles keep a plain edge."""
     cx, cy = rect.center
     h = BRICK_SIZE / 2 + gap
     if shape == "round":  # lower arc between the SHIELD_ROUND_ARC angles
         a0, span = SHIELD_ROUND_ARC, math.pi - 2 * SHIELD_ROUND_ARC
         return [(cx + h * math.cos(a0 + span * k / 12),
                  cy + h * math.sin(a0 + span * k / 12)) for k in range(13)]
-    if not shield_wraps(shape, tri_dir):  # up/left/right triangles
-        if tri_dir == "up":
-            return [(cx - h, cy + h), (cx + h, cy + h)]
-        if tri_dir == "left":  # bottom slant: apex to bottom-right
-            return [(cx - h, cy), (cx + h, cy + h)]
-        return [(cx - h, cy + h), (cx + h, cy)]
+    if not shield_wraps(shape, tri_dir):  # upward triangle: plain base
+        return [(cx - h, cy + h), (cx + h, cy + h)]
     if shape in ("square", "wide", "tall"):
         r = rect.inflate(2 * gap, 2 * gap)
         poly = [r.topleft, r.topright, r.bottomright, r.bottomleft]
-    else:  # diamond, hexagon, triangle down, trapezoid (either way up)
+    else:  # diamond, hexagon, down/left/right triangles, trapezoids
         poly = shape_points(shape, tri_dir, cx, cy, h)
     return _wrap_underside([(float(x), float(y)) for x, y in poly])
 

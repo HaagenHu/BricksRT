@@ -554,6 +554,14 @@ def test_shield_covers_its_band():
     # Downward triangle: the whole V is covered now, not just below center
     assert strike("triangle", "down", "upper_slant") == "shield"
     assert strike("triangle", "down", "top") == "hp"
+    # Left-pointing triangle: its band wraps up the right side at the
+    # bottom corner now, so a side hit low on that edge is shielded,
+    # one halfway up is not
+    assert strike("triangle", "left", "side_low") == "shield"
+    assert strike("triangle", "left", "side_mid") == "hp"
+    assert g.shield_wraps("triangle", "left")
+    assert g.shield_wraps("triangle", "right")
+    assert not g.shield_wraps("triangle", "up")
 
 
 def test_shield_flash_and_break():

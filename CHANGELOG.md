@@ -12,6 +12,11 @@
   tunnel through; each deflection counts toward the anti-loop gravity;
   spent shells pass through. New cues for appearing and breaking; a
   FIELD row on the help screen
+- **Rounded shields on left/right triangles**: their band now wraps
+  around the end corners with rounded bends like the other shapes
+  (was a plain slant); only round bricks and upward triangles keep a
+  plain edge. Protection follows the band, so a low hit on the flat
+  side near the bottom corner is shielded
 - **Fix: shots leaked through walls** — ~28% at 60 fps, ~64% on a
   30 fps hitch. The wall only caught a ball inside a thin band and
   judged the bounce by which side the ball was on *now*; a 10-20px
