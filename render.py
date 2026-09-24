@@ -13,6 +13,7 @@ from game import (
     ACID_RADIUS_CELLS, TAR_RADIUS_CELLS, AMMO_TYPES, UNLOCK,
     SPAWN_ANIM_TIME, DEATH_ANIM_TIME, BRICK_FLASH_TIME, AMMO_FLASH_TIME,
     HIT_FLASH_TIME, GUN_KICK_TIME, MORTAR_COOLDOWN, COLS, MAX_ROWS,
+    LIGHTNING_BOLT_TTL, LIGHTNING_FLASH_TIME,
     Brick, Game, cell_rect, make_shards, step_shards,
 )
 
@@ -378,16 +379,112 @@ def _button(screen: pygame.Surface, rect: pygame.Rect, label: str,
     _blit_centered(screen, font.render(label, True, TEXT_COLOR), rect.center)
 
 
-_freeze_tint: pygame.Surface | None = None
+_field_tints: dict[tuple[int, int, int], pygame.Surface] = {}
 
 
-def _freeze_overlay() -> pygame.Surface:
-    """Field-sized icy wash, alpha set per frame to fade it out."""
-    global _freeze_tint
-    if _freeze_tint is None:
-        _freeze_tint = pygame.Surface((WIDTH, GRID_BOTTOM - GRID_TOP))
-        _freeze_tint.fill(FREEZE_COLOR)
-    return _freeze_tint
+def _field_overlay(color: tuple[int, int, int]) -> pygame.Surface:
+    """Field-sized flat wash (freeze tint, lightning flash); the caller
+    sets its alpha per frame to fade it."""
+    surf = _field_tints.get(color)
+    if surf is None:
+        surf = pygame.Surface((WIDTH, GRID_BOTTOM - GRID_TOP))
+        surf.fill(color)
+        _field_tints[color] = surf
+    return surf
+
+
+# Lightning: the game stores only a bolt's route (trigger point, then
+# each struck brick); the jagged path and its forks are rebuilt from a
+# per-bolt seed BOLT_REJAG_HZ times a second, so the bolt crackles
+LIGHTNING_FLASH_COLOR = (255, 250, 220)
+BOLT_REJAG_HZ = 30
+BOLT_SEGMENT = 14   # px between jag points (long hops get more detail)
+BOLT_SPREAD = 12    # px max sideways jag on the main bolt
+BOLT_FORK_CHANCE = 0.18  # per main-path point
+
+
+def _jag(nodes: list[tuple[float, float]], rng: random.Random,
+         spread: float) -> list[tuple[float, float]]:
+    """Subdivide a polyline with random sideways offsets, tapered to zero
+    at each node so the bolt attaches cleanly to what it strikes."""
+    out = [nodes[0]]
+    for (x1, y1), (x2, y2) in zip(nodes, nodes[1:]):
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1:
+            out.append((x2, y2))
+            continue
+        nx, ny = -dy / length, dx / length  # perpendicular unit
+        n = max(2, int(length / BOLT_SEGMENT))
+        for i in range(1, n):
+            t = i / n
+            off = rng.uniform(-spread, spread) * math.sin(math.pi * t)
+            out.append((x1 + dx * t + nx * off, y1 + dy * t + ny * off))
+        out.append((x2, y2))
+    return out
+
+
+def draw_bolt(screen: pygame.Surface, bolt: dict, time: float):
+    life = max(0.0, bolt["timer"]) / LIGHTNING_BOLT_TTL  # 1 -> 0
+    frame = int(time * BOLT_REJAG_HZ)
+    rng = random.Random(bolt["seed"] * 1009 + frame)
+    # Strobe while fresh (every third frame-bucket dips), then fade out
+    power = 0.35 if life > 0.6 and frame % 3 == 2 else life ** 0.6
+
+    main = _jag(bolt["nodes"], rng, BOLT_SPREAD)
+    forks = []
+    for i in range(1, len(main) - 1):
+        if rng.random() < BOLT_FORK_CHANCE:
+            (xa, ya), (x0, y0), (xb, yb) = main[i - 1], main[i], main[i + 1]
+            ang = (math.atan2(yb - ya, xb - xa)
+                   + rng.choice((-1, 1)) * rng.uniform(0.5, 1.1))
+            reach = rng.uniform(14, 34)
+            forks.append(_jag([(x0, y0), (x0 + math.cos(ang) * reach,
+                                          y0 + math.sin(ang) * reach)],
+                              rng, 5))
+
+    for gx, gy in main[::2]:
+        draw_glow(screen, LIGHTNING_COLOR, gx, gy, 18, 0.45 * power)
+    outer = _mix(BG_COLOR, LIGHTNING_COLOR, 0.45 * power)
+    mid = _mix(BG_COLOR, LIGHTNING_COLOR, power)
+    core = _mix(BG_COLOR, TEXT_COLOR, power)
+    for fork in forks:  # thinner, no white core
+        pts = [(int(x), int(y)) for x, y in fork]
+        pygame.draw.lines(screen, outer, False, pts, 3)
+        pygame.draw.lines(screen, mid, False, pts, 1)
+    pts = [(int(x), int(y)) for x, y in main]
+    pygame.draw.lines(screen, outer, False, pts, 5)
+    pygame.draw.lines(screen, mid, False, pts, 3)
+    pygame.draw.lines(screen, core, False, pts, 1)
+
+    # Flares: the trigger point, and white-hot on each struck brick
+    # (kept moderate — they sit on the HP number)
+    draw_glow(screen, LIGHTNING_COLOR, *bolt["nodes"][0], 22, 0.6 * power)
+    for nx, ny in bolt["nodes"][1:]:
+        draw_glow(screen, TEXT_COLOR, nx, ny, 24, 0.4 * power)
+
+
+def _draw_crackle(screen: pygame.Surface, rect: pygame.Rect, brick: Brick,
+                  time: float):
+    """Lightning-stunned brick: two short arcs crawling around its edge,
+    redrawn at 20 Hz, fading over the stun's last half second."""
+    fade = min(1.0, brick.zap_t / 0.5)
+    rng = random.Random((brick.col * 7 + brick.row * 13) * 7919
+                        + int(time * 20))
+    cx, cy = rect.center
+    rx, ry = rect.width / 2 + 1, rect.height / 2 + 1
+    arc = _mix(BG_COLOR, LIGHTNING_COLOR, fade)
+    core = _mix(BG_COLOR, TEXT_COLOR, fade)
+    for _ in range(2):
+        a0, span = rng.uniform(0, math.tau), rng.uniform(0.5, 0.9)
+        pts = []
+        for k in range(5):
+            a = a0 + span * k / 4
+            wob = rng.uniform(-3, 3)
+            pts.append((cx + math.cos(a) * (rx + wob),
+                        cy + math.sin(a) * (ry + wob)))
+        pygame.draw.lines(screen, arc, False, pts, 2)
+        pygame.draw.lines(screen, core, False, pts, 1)
 
 
 def _smoke_sprite(radius: int) -> pygame.Surface:
@@ -660,6 +757,9 @@ def draw_brick(screen: pygame.Surface, brick: Brick, y_offset: float = 0,
             glow_surf.fill((*SHIELD_COLOR, 60))
             screen.blit(glow_surf, (rect.left, rect.bottom - 3))
 
+    if brick.zap_t > 0 and not frozen:
+        _draw_crackle(screen, rect, brick, time)
+
     # Frost glint: while frozen, each brick twinkles now and then at a
     # fixed spot (seeded by its cell; frozen bricks don't move rows)
     if frozen:
@@ -788,7 +888,7 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     # Freeze: icy wash over the field, fading over the last half second
     if game.freeze_timer > 0:
-        tint = _freeze_overlay()
+        tint = _field_overlay(FREEZE_COLOR)
         tint.set_alpha(int(30 * min(1.0, game.freeze_timer / 0.5)))
         screen.blit(tint, (0, GRID_TOP))
 
@@ -936,14 +1036,14 @@ def draw_game(screen: pygame.Surface, game: Game,
     for sk in game.placed_skulls:
         draw_skull_icon(screen, int(sk["x"]), int(sk["y"]))
 
-    # Lightning bolts (brief jagged flashes)
+    # Lightning: brief field flash, then each bolt drawn fresh every
+    # frame-bucket so it crackles and forks while it fades
+    if game.lightning_flash > 0:
+        flash = _field_overlay(LIGHTNING_FLASH_COLOR)
+        flash.set_alpha(int(70 * game.lightning_flash / LIGHTNING_FLASH_TIME))
+        screen.blit(flash, (0, GRID_TOP))
     for bolt in game.lightning_bolts:
-        pts = [(int(x), int(y)) for x, y in bolt["points"]]
-        if len(pts) >= 2:
-            for gx, gy in pts[::2]:
-                draw_glow(screen, LIGHTNING_COLOR, gx, gy, 16, 0.4)
-            pygame.draw.lines(screen, LIGHTNING_COLOR, False, pts, 3)
-            pygame.draw.lines(screen, TEXT_COLOR, False, pts, 1)
+        draw_bolt(screen, bolt, game.game_time)
 
     # Reverse wave visual (horizontal line radiates upward from bottom)
     if game.reverse_wave:

@@ -95,6 +95,7 @@ PARTICLE_MAX = 400         # per list (sparks, smoke)
 SHAKE_BOMB = 0.3
 SHAKE_WALL_BREAK = 0.45
 SHAKE_SKULL = 0.7
+SHAKE_LIGHTNING = 0.25
 SHAKE_DECAY = 1.8          # trauma drained per second
 GUN_KICK_TIME = 0.1        # barrel recoil + muzzle flash per trigger
                            # (under GUN_COOLDOWN, so held fire pulses)
@@ -122,7 +123,8 @@ STICKY_FUSE = 1.5       # mine bullet: seconds until the charge blows
 
 LIGHTNING_STRIKES = 6      # bricks hit per lightning trigger
 LIGHTNING_STUN = 2.0       # seconds a struck brick stops advancing
-LIGHTNING_BOLT_TTL = 0.35  # seconds a bolt stays visible
+LIGHTNING_BOLT_TTL = 0.45  # seconds a bolt stays visible
+LIGHTNING_FLASH_TIME = 0.15  # field flash on a strike (visual only)
 
 SKULL_START = 600.0     # seconds of game time before skulls appear
 SKULL_INTERVAL = 300.0  # seconds between skull spawns
@@ -208,6 +210,8 @@ class Brick:
     spawn_t: float = 0.0  # slide-in animation remaining (visual only)
     flash: float = 0.0   # skull-sweep flash remaining (visual only)
     hit_t: float = 0.0   # hit flash remaining (visual only)
+    zap_t: float = 0.0   # lightning-stun crackle remaining (visual only;
+                         # wall bullets also stun, but don't crackle)
     slow_pct: float = 0.0  # tar-bullet slow, 0..1 (0.15 per hit)
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
     acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
@@ -349,25 +353,6 @@ def step_shards(shards: list[dict], dt: float) -> list[dict]:
     return [s for s in shards if s["timer"] > 0]
 
 
-def _jagged_path(points: list[tuple[float, float]],
-                 steps: int = 5, spread: float = 8.0) -> list[tuple[float, float]]:
-    """Subdivide a polyline with random perpendicular offsets (lightning look)."""
-    out: list[tuple[float, float]] = [points[0]]
-    for (x1, y1), (x2, y2) in zip(points, points[1:]):
-        dx, dy = x2 - x1, y2 - y1
-        length = math.hypot(dx, dy)
-        if length < 1:
-            out.append((x2, y2))
-            continue
-        nx, ny = -dy / length, dx / length  # perpendicular unit
-        for i in range(1, steps):
-            t = i / steps
-            off = random.uniform(-spread, spread)
-            out.append((x1 + dx * t + nx * off, y1 + dy * t + ny * off))
-        out.append((x2, y2))
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Game
 # ---------------------------------------------------------------------------
@@ -456,7 +441,9 @@ class Game:
         self.reverse_timer = 0.0  # seconds remaining of reverse
         self.reverse_wave: dict | None = None  # {x, y, height, max_height, speed}
         self.skull_wave: dict | None = None  # {x, y, radius, max_radius, speed}
-        self.lightning_bolts: list[dict] = []  # {points, timer}
+        # {nodes: route points, seed: re-jag seed, timer}
+        self.lightning_bolts: list[dict] = []
+        self.lightning_flash = 0.0  # field flash remaining (visual only)
 
         # Advance speed
         self.advance_speed = ADVANCE_SPEED_BASE
@@ -772,6 +759,9 @@ class Game:
                 b.flash = max(0.0, b.flash - dt)
             if b.hit_t > 0:
                 b.hit_t = max(0.0, b.hit_t - dt)
+            if b.zap_t > 0:
+                b.zap_t = max(0.0, b.zap_t - dt)
+        self.lightning_flash = max(0.0, self.lightning_flash - dt)
         self.ammo_flash = max(0.0, self.ammo_flash - dt)
 
         # Board cleared this frame: drop a pickup as a reward
@@ -1886,20 +1876,36 @@ class Game:
         targets = random.sample(self.bricks,
                                 min(LIGHTNING_STRIKES, len(self.bricks)))
         damage = max(1, self.wave // 5)
-        points = [(x, y)]
+        center = {id(b): cell_rect(b.col, b.row, b.shape,
+                                   self._brick_off(b)).center
+                  for b in targets}
+        # Bolt route (visual): hop to the nearest unvisited target, so it
+        # reads as one chain instead of zigzagging across the field
+        nodes = [(x, y)]
+        pool = list(targets)
+        while pool:
+            cx, cy = nodes[-1]
+            nxt = min(pool, key=lambda b: math.hypot(center[id(b)][0] - cx,
+                                                     center[id(b)][1] - cy))
+            pool.remove(nxt)
+            nodes.append(center[id(nxt)])
         for b in targets:
-            rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
-            points.append(rect.center)
             b.hp -= damage
             b.hit_t = HIT_FLASH_TIME
             b.stun = LIGHTNING_STUN
+            b.zap_t = LIGHTNING_STUN
             if b.hp <= 0:
                 self._kill_brick(b, damage)
         self.bricks = [b for b in self.bricks if b.hp > 0]
+        # The renderer re-jags the route between nodes every frame
         self.lightning_bolts.append({
-            "points": _jagged_path(points),
+            "nodes": nodes, "seed": _FX_RNG.randrange(1 << 30),
             "timer": LIGHTNING_BOLT_TTL,
         })
+        for px, py in nodes[1:]:
+            self._spawn_sparks(px, py, 6, (255, 240, 120))
+        self.lightning_flash = LIGHTNING_FLASH_TIME
+        self._add_shake(SHAKE_LIGHTNING)
 
     def _trigger_skull(self, x: float, y: float):
         """Halve everything: brick HP and shields, but also gun ammo.

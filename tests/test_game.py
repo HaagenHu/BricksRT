@@ -642,8 +642,23 @@ def test_lightning_zaps_and_stuns():
     assert all(b.stun == g.LIGHTNING_STUN for b in struck)
     assert all(b.stun == 0 for b in gm.bricks if b.hp == 100)
     assert len(gm.lightning_bolts) == 1
-    # Bolt path visits trigger point + one center per strike (jagged between)
-    assert len(gm.lightning_bolts[0]["points"]) > g.LIGHTNING_STRIKES
+    # Route: trigger point, then each struck center, nearest-first
+    nodes = gm.lightning_bolts[0]["nodes"]
+    assert len(nodes) == g.LIGHTNING_STRIKES + 1
+    assert nodes[0] == (240.0, 400.0)
+    hop = lambda a, b: ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5  # noqa
+    for i in range(1, len(nodes) - 1):  # each hop is the shortest left
+        assert all(hop(nodes[i - 1], nodes[i]) <= hop(nodes[i - 1], n) + 1e-9
+                   for n in nodes[i + 1:])
+    assert all(b.zap_t == g.LIGHTNING_STUN for b in struck)
+    assert gm.lightning_flash == g.LIGHTNING_FLASH_TIME
+    # Visuals don't consume the gameplay RNG
+    state = random.getstate()
+    gm._trigger_lightning(240.0, 400.0)
+    after = random.getstate()
+    random.setstate(state)
+    random.sample(gm.bricks, min(g.LIGHTNING_STRIKES, len(gm.bricks)))
+    assert random.getstate() == after  # only the target pick used it
 
     # Lethal strikes remove bricks
     gm2 = _fresh_game(wave=20)

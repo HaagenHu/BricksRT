@@ -8,6 +8,12 @@
   ammo type — for
   testing late-game content; marked PRACTICE in the HUD and never
   records a highscore
+- **Lightning**: the bolt chains nearest-first through its targets
+  (was a random zigzag) and is re-jagged 30x/s so it crackles, with
+  forks, layered glow, flares on each struck brick, sparks, a brief
+  field flash and a small shake; it lingers 0.45s (was 0.35s) with a
+  strobe then a fade. Struck bricks crackle with arcs while stunned.
+  The jagging no longer draws from the gameplay RNG
 - Bigger extra-ball "+" and brick HP numbers (numbers shrink only when
   they'd overflow a triangle or diamond); roomier help screen
 
