@@ -480,6 +480,34 @@ def test_sound_player():
         pygame.mixer.quit()
 
 
+def test_reload_feeder_caps_rate():
+    gm = _fresh_game(wave=5)
+    gm.bricks, gm.pickups = [], []
+    gm.gun_ammo = 0
+    gm.gun_reloading = 30  # a big volley just came back at once
+    assert gm.gun_reloading == 30
+
+    def run(seconds):
+        for _ in range(round(seconds * 60)):
+            gm.update(1 / 60)
+
+    run(g.GUN_RELOAD_DELAY - 0.1)
+    assert gm.gun_ammo == 0  # still inside the delay
+    run(0.1 + 1.0)  # delay over, then one second of feeding
+    assert abs(gm.gun_ammo - g.GUN_FEED_RATE) <= 1  # ~10, not all 30
+    assert gm.gun_reloading == 30 - gm.gun_ammo
+    run(30 / g.GUN_FEED_RATE)
+    assert gm.gun_ammo == 30 and gm.gun_reloading == 0
+
+    # Idling can't bank a burst: after a long pause, a fresh batch still
+    # feeds at the rate
+    run(5.0)
+    gm.gun_ammo = 0
+    gm.gun_reloading = 20
+    run(g.GUN_RELOAD_DELAY + 0.5)
+    assert gm.gun_ammo <= g.GUN_FEED_RATE * 0.5 + 1
+
+
 def test_extra_ball_chance_tapers():
     assert g.extra_ball_chance(1) == g.EXTRA_BALL_CHANCE_START
     end = g.EXTRA_BALL_CHANCE_END

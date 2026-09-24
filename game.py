@@ -55,6 +55,7 @@ MIN_BOUNCE_ANGLE = 8  # degrees — min rebound off walls/ceiling so
 GUN_COOLDOWN = 0.12  # seconds between shots
 GUN_BARREL_LEN = 40  # px — shots launch from the barrel tip
 GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
+GUN_FEED_RATE = 10.0    # then balls reload one by one, at most this many/s
 STARTING_GUN_AMMO = 1
 # Extra-ball pickup on a new wave's row: a per-wave chance that tapers
 # linearly from START (wave 1) to END (wave TAPER_WAVES and beyond), so
@@ -391,8 +392,10 @@ class Game:
         self.gun_x = WIDTH / 2  # gun position, drifts toward exit points
         self.gun_ammo = STARTING_GUN_AMMO
         self.gun_cooldown = 0.0
-        self.gun_reloading = 0  # ammo pending reload
-        self.gun_reload_timer = 0.0
+        # Returned balls on their way back: game_time each becomes ready
+        # (oldest first); the feeder then reloads them at GUN_FEED_RATE
+        self.reload_queue: deque[float] = deque()
+        self.feed_credit = 1.0
         self.ammo_debt = 0  # skull penalty: eats returning shots
         self.ammo_flash = 0.0  # HUD pulse after the skull's ammo cut
         self.skull_hp_cut = 0  # permanent deduction on new-brick HP
@@ -639,21 +642,24 @@ class Game:
                 if self.ammo_debt > 0:
                     self.ammo_debt -= 1
                 else:
-                    self.gun_reloading += 1
-                    if self.gun_reload_timer <= 0:
-                        self.gun_reload_timer = GUN_RELOAD_DELAY
+                    self.reload_queue.append(self.game_time
+                                             + GUN_RELOAD_DELAY)
                 # Nudge gun toward exit point (10% of distance)
                 self.gun_x += (p.pos.x - self.gun_x) * 0.1
                 self.gun_x = max(PROJECTILE_RADIUS,
                                  min(WIDTH - PROJECTILE_RADIUS, self.gun_x))
         self.projectiles = [p for p in self.projectiles if p.alive]
 
-        # Reload timer: pending ammo becomes available after delay
-        if self.gun_reloading > 0 and self.gun_reload_timer > 0:
-            self.gun_reload_timer -= dt
-            if self.gun_reload_timer <= 0:
-                self.gun_ammo += self.gun_reloading
-                self.gun_reloading = 0
+        # Feeder: each returned ball waits GUN_RELOAD_DELAY, then balls
+        # reload one at a time at up to GUN_FEED_RATE per second. A big
+        # pool is a burst reserve; sustained fire tops out at the rate.
+        # Credit banks at most one ball, so idling can't store a burst.
+        self.feed_credit = min(1.0, self.feed_credit + GUN_FEED_RATE * dt)
+        q = self.reload_queue
+        while self.feed_credit >= 1.0 and q and q[0] <= self.game_time:
+            q.popleft()
+            self.gun_ammo += 1
+            self.feed_credit -= 1.0
 
         # Mines: explode when any brick overlaps them
         self._check_mines()
@@ -1278,6 +1284,21 @@ class Game:
         angle = max(angle, -math.pi + 0.15)
         angle = min(angle, -0.15)
         self.aim_angle = angle
+
+    @property
+    def gun_reloading(self) -> int:
+        """Balls on their way back into the gun (waiting or feeding)."""
+        return len(self.reload_queue)
+
+    @gun_reloading.setter
+    def gun_reloading(self, n: int):
+        # Cuts (the skull) remove the newest returns first; growing it
+        # queues fresh returns
+        q = self.reload_queue
+        while len(q) > max(0, n):
+            q.pop()
+        while len(q) < n:
+            q.append(self.game_time + GUN_RELOAD_DELAY)
 
     def volley_size(self) -> int:
         """Shots per trigger — grows with the ammo pool. While firing,

@@ -25,8 +25,10 @@ Based on the turn-based [Bricks](https://github.com/HaagenHu/Bricks) game, reusi
 Fires single projectiles from the barrel tip. Rapid fire with cooldown.
 
 - Normal balls bounce off bricks, 1 damage per hit; the pool circulates
-  (exit at bottom = ammo returns after a short reload delay, and the
-  gun drifts toward the exit point)
+  (exit at bottom = ammo returns after a 1s reload delay, then feeds
+  back one ball at a time at up to 10/s, and the gun drifts toward the
+  exit point). The feeder caps sustained fire, so a big pool is a
+  burst reserve rather than endless fire
 - Volley scaling: surplus ammo converts to shots per trigger in a
   small spread — 2 at 15+ ammo, 3 at 30+, 4 at 45+. While firing, the
   size can grow if the pool grows (pickups) but never shrinks as it

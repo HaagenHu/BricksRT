@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Balance — reload feeder**: returned balls still wait 1s, then
+  reload one at a time at up to 10/s (was: every ball back in the
+  same second released together). Big pools become a burst reserve —
+  held fire drains them, then trickles at ~10 balls/s. Sustained fire
+  with 60 balls drops from ~19 to ~9 balls/s; pools of 15 or fewer are
+  unchanged
 - **Balance — fewer extra balls late**: a new wave's row now carries
   an extra-ball pickup by chance, tapering from 80% at wave 1 to 40% at
   wave 100 and after (was: every wave except every 5th). A perfect run
