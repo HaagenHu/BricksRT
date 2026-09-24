@@ -142,7 +142,7 @@ Recommended first: Split shot + Updraft.
 
 ### Deflectors
 
-**Status:** the **paddle** is implemented (Unreleased) as a random
+**Status:** the **paddle** is implemented (v0.7.0) as a random
 field appearance, not a mortar type: from wave 50, 20% chance per new
 wave, max 2, 6s, random tilt up to 60 deg, kinds still 40% / spin
 (60 deg/s) 30% / kick (15 deg per hit) 30% — continuous spin was kept

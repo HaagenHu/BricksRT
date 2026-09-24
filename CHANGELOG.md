@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.7.0 — Turret control, paddles, shapes, wall fix (2026-09-24)
+
+### Controls
 
 - **Turret moves with A / D** (160 px/s, ~3s edge to edge, full speed
   at once, stops at the edges, not while paused) instead of drifting
@@ -10,6 +12,9 @@
 - **Controls**: panic gun moves from W to **E** (W sits in the A/D
   cluster — an accidental panic spends a unit of every ammo type);
   **middle click** loads the gun like R. Menu controls list updated
+
+### Paddles
+
 - **Paddles** (from wave 50): a stationary deflector that appears on
   its own — 20% chance per new wave, up to 2 at once — in open space
   in the lower field at a random tilt (up to 60 deg). It mirror-bounces
@@ -20,6 +25,9 @@
   tunnel through; each deflection counts toward the anti-loop gravity;
   spent shells pass through. New cues for appearing and breaking; a
   FIELD row on the help screen
+
+### Bricks and shields
+
 - **Trapezoids point four ways**: left and right join up and down
   (tri_dir = the side the narrow edge faces), 1 in 4 each, like the
   triangles. Their shield band wraps with a curl; collision uses the
@@ -38,11 +46,17 @@
     corners — the whole slant was covered); round bricks cover exactly
     the lower half (was 0.3 rad short of the center line at each end).
     Hits on the upper half of those faces now go to hp
+
+### Fixes and docs
+
 - **Fix: shots leaked through walls** — ~28% at 60 fps, ~64% on a
   30 fps hitch. The wall only caught a ball inside a thin band and
   judged the bounce by which side the ball was on *now*; a 10-20px
   step past the line matched neither case. It now sweeps the ball's
   path this frame and bounces by the side it came from: 0 leaks
+- **README**: the Concept section rewritten for the current game (it
+  still described pre-v0.4 weapons and keys 1-5), plus a controls
+  table; Graphics mentions shields and lightning
 
 ## v0.6.0 — Balance, shields, acid, lightning, practice (2026-09-24)
 
