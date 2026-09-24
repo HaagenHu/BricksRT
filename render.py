@@ -567,19 +567,22 @@ def _draw_shield(screen: pygame.Surface, brick: Brick, rect: pygame.Rect,
     hit = brick.shield_hit_t / SHIELD_HIT_TIME if SHIELD_HIT_TIME else 0.0
     breathe = 0.85 + 0.15 * math.sin(time * 3 + seed)
     power = strength * breathe
+    # Acid on the brick turns the band acid-green (it eats shields
+    # first); eases back to cyan over the tint's last 0.3s
+    scol = _mix(SHIELD_COLOR, MORTAR_ACID_COLOR, min(1.0, brick.acid_t / 0.3))
 
     for k in range(5):  # soft glow under the band
         gx, gy = _along(edge, (k + 0.5) / 5)
-        draw_glow(screen, SHIELD_COLOR, gx, gy, 14, 0.3 * power + 0.5 * hit)
+        draw_glow(screen, scol, gx, gy, 14, 0.3 * power + 0.5 * hit)
     width = 1 + round(3 * strength)  # 2px worn .. 4px full
-    outer = _mix(BG_COLOR, SHIELD_COLOR, 0.5 * power + 0.3 * hit)
+    outer = _mix(BG_COLOR, scol, 0.5 * power + 0.3 * hit)
     if strength > SHIELD_LAYERED:  # strong: a faint second band outside
         echo = [(int(x), int(y)) for x, y in
                 _shield_edge(brick.shape, brick.tri_dir, rect, SHIELD_GAP + 5)]
-        pygame.draw.lines(screen, _mix(BG_COLOR, SHIELD_COLOR, 0.55 * power),
+        pygame.draw.lines(screen, _mix(BG_COLOR, scol, 0.55 * power),
                           False, echo, 1)
-    body = _mix(SHIELD_COLOR, TEXT_COLOR, 0.8 * hit)
-    core = _mix(SHIELD_COLOR, TEXT_COLOR, 0.55 + 0.45 * hit)
+    body = _mix(scol, TEXT_COLOR, 0.8 * hit)
+    core = _mix(scol, TEXT_COLOR, 0.55 + 0.45 * hit)
     pygame.draw.lines(screen, outer, False, pts, width + 3)
     pygame.draw.lines(screen, body, False, pts, width + 1)
     pygame.draw.lines(screen, core, False, pts, 1)
@@ -1123,7 +1126,19 @@ def draw_game(screen: pygame.Surface, game: Game,
 
     # Projectiles
     for p in game.projectiles:
-        if p.alive:
+        if p.alive and p.shell:
+            # Spent shell: a hollow, dim ring of its payload's color with
+            # a faint short trail — clearly out of play, falling away
+            scol = _mix(BG_COLOR, MORTAR_ACID_COLOR if p.shell == "acid"
+                        else MINE_COLOR, 0.55)
+            tail = list(p.trail)[-3:]
+            for i, (tx, ty) in enumerate(tail):
+                pygame.draw.circle(screen, _mix(BG_COLOR, scol,
+                                                (i + 1) / (len(tail) + 1)),
+                                   (int(tx), int(ty)), 2)
+            pygame.draw.circle(screen, scol, (int(p.pos.x), int(p.pos.y)),
+                               PROJECTILE_RADIUS, 1)
+        elif p.alive:
             if p.fireball:
                 pcolor = FIREBALL_COLOR
             elif p.homing:
@@ -1134,6 +1149,8 @@ def draw_game(screen: pygame.Surface, game: Game,
                 pcolor = MORTAR_ACID_COLOR
             elif p.wallshot:
                 pcolor = MORTAR_WALL_COLOR
+            elif p.mine:
+                pcolor = MINE_COLOR
             else:
                 pcolor = TEXT_COLOR
             # Trail: a tapering streak cooling toward the bg (segments
@@ -1612,7 +1629,7 @@ def draw_help(screen: pygame.Surface, font: pygame.font.Font,
     row(pickup("tar"),
         f"Tar — slow zone 8s / slow 15% per hit (wave {UNLOCK['tar']}+)")
     row(pickup("acid"),
-        f"Acid — melts shields then hp, 1/s (wave {UNLOCK['acid']}+)")
+        f"Acid — melts shields then hp / 2/s burn (wave {UNLOCK['acid']}+)")
     row(pickup("homing"),
         f"Homing — rocket / steering shots (wave {UNLOCK['homing']}+)")
 

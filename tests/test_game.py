@@ -253,7 +253,9 @@ def test_sticky_charge_blows_after_fuse():
     assert not p.mine  # one charge per bullet
     assert len(gm.sticky_charges) == 1
     assert gm.sticky_charges[0]["brick"] is host
-    assert p.alive  # the ball bounced on
+    # The ball doesn't bounce on: it drops straight down, a spent shell
+    assert p.alive and p.shell == "mine"
+    assert p.vel.x == 0 and p.vel.y > 0
     hp_before = host.hp
     # Fuse runs down -> explosion at the host's position
     for _ in range(int(g.STICKY_FUSE * 60) + 5):
@@ -1108,10 +1110,30 @@ def test_acidshot_dot_dissolves():
     gm._collide_bricks(p)
     assert b.hp == 2  # direct hit
     assert b.acid_dot == g.ACIDSHOT_DOT
-    # DoT ticks 1 dmg/s: 2 hp gone within 2.5s
-    for _ in range(150):
+    assert p.shell == "acid" and p.vel.x == 0  # spent: drops, no bounce
+    # Burn ticks at 2 dmg/s: the last 2 hp are gone within 1.1s
+    for _ in range(66):
         gm.update(1 / 60)
     assert b not in gm.bricks
+
+
+def test_spent_shell_falls_through_everything():
+    gm = _fresh_game(wave=60)
+    below = Brick(col=3, row=6, hp=10)
+    gm.bricks, gm.pickups = [below], [{"col": 3, "row": 5, "type": "ammo"}]
+    rect = g.cell_rect(3, 3, "square", gm.brick_offset)
+    p = Projectile((rect.centerx, rect.centery), (0, 0))
+    g.Game._spend(p, "acid")
+    gm.projectiles = [p]
+    gm.gun_ammo = 0
+    for _ in range(240):  # 4s: long enough to fall out
+        gm.update(1 / 60)
+        if not p.alive:
+            break
+    assert not p.alive and p.exited_bottom
+    assert below.hp == 10              # passed through the brick below
+    assert len(gm.pickups) == 1        # didn't collect the pickup
+    assert gm.gun_reloading + gm.gun_ammo == 1  # still returns to pool
 
 
 def test_effects_damage_shields():
@@ -1142,7 +1164,7 @@ def test_effects_damage_shields():
     b.acid_tick = 0.0
     gm.placed_acids.clear()
     hp3 = b.hp
-    for _ in range(150):  # 2.5s -> two ticks
+    for _ in range(70):  # ~1.17s at 2 ticks/s -> two ticks (3rd at 1.5s)
         gm.update(1 / 60)
     assert b.shield == 0 and b.hp == hp3 - 1
 

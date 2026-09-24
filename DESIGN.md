@@ -47,11 +47,11 @@ first stocked type.
 
 | Type | Mortar round | Gun load (5 bullets) | Unlock |
 |------|--------------|----------------------|--------|
-| Mine | Lands armed, explodes on brick contact (chains) | Sticky charge: rides the first brick hit, blows after 1.5s | 10 |
+| Mine | Lands armed, explodes on brick contact (chains) | Sticky charge: rides the first brick hit, blows after 1.5s; the ball drops as a spent shell | 10 |
 | Wall | Barrier holding the field until overloaded | Full stop on hit brick, 2s | 20 |
 | Bomb | Explodes at target, area damage, halves shields | Fire bullet: pierces through bricks, chips 1 shield per pass | 30 |
 | Tar | Zone halving brick advance speed, 8s | +15% slow per hit, stacks to a stop, 3s from last hit | 40 |
-| Acid | Area DoT zone, 5s — melts shields before hp | Acid DoT: 1/s for 3s, shield first | 60 |
+| Acid | Area DoT zone, 5s — melts shields before hp | Acid burn: 2/s for 3s, shield first (shield glows green); the ball drops as a spent shell | 60 |
 | Homing | Rocket: flies to the brick nearest the gun and explodes on it | Shots steer toward the nearest brick, 10s | 100 |
 
 - Panic mortar (Q): fires one shell of each stocked mortar-capable

@@ -19,6 +19,13 @@
   upside-down trapezoids are shielded along their whole underside,
   and square bricks' lower side corners are now shielded too. The
   geometry lives in game.py and the renderer draws from it
+- **Acid and sticky-mine bullets are one-shot**: they deliver their
+  payload on the first brick they hit, then drop straight down as a
+  hollow spent shell (no more bounces or collisions) and return to the
+  pool off the bottom as usual. Before, both kept bouncing
+- **Acid bullet burn doubled** to 2 damage/s (3s, 6 total), shields
+  first; a shield being eaten by acid (bullet burn or pool) glows
+  acid-green and throws green sparks
 - **New shape — upside-down trapezoid**: trapezoids now come in an
   up/down pair like the triangles (narrow top / narrow base), chosen
   50/50 from wave 30; collision follows the orientation

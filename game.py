@@ -126,7 +126,14 @@ REVERSE_DURATION = 3.0  # seconds
 GUN_LOAD_SHOTS = 5      # special bullets per ammo unit loaded (R key)
 TARSHOT_SLOW = 0.15     # slow added per tar-bullet hit (stacks to 1.0)
 TARSHOT_TIME = 3.0      # slow lasts this long after the LAST hit
-ACIDSHOT_DOT = 3.0      # seconds of 1 dmg/s after an acid-bullet hit
+ACIDSHOT_DOT = 3.0      # seconds of burn after an acid-bullet hit
+ACIDSHOT_DPS = 2.0      # burn damage per second (1 per tick, shield first)
+# Acid and mine bullets deliver their payload on the first brick they
+# hit, then drop straight down as spent shells (no more collisions) and
+# return to the pool off the bottom like any ball
+SHELL_DROP_SPEED = 120.0  # px/s downward right after the hit
+SHELL_GRAVITY = 900.0     # px/s^2 as it falls
+ACID_SHIELD_COLOR = (120, 255, 0)  # shield sparks while acid eats it
 WALLSHOT_STUN = 2.0     # wall bullet: full stop on the hit brick
 STICKY_FUSE = 1.5       # mine bullet: seconds until the charge blows
 
@@ -226,7 +233,7 @@ class Brick:
     shield_prev: int = -1      # last frame's shield, to spot any loss
     slow_pct: float = 0.0  # tar-bullet slow, 0..1 (0.15 per hit)
     slow_t: float = 0.0    # seconds of tar-bullet slow remaining
-    acid_dot: float = 0.0  # seconds of acid-bullet DoT (1 dmg/s) left
+    acid_dot: float = 0.0  # seconds of acid-bullet burn left
     acid_tick: float = 0.0  # DoT accumulator toward the next damage
 
     def cells(self) -> list[tuple[int, int]]:
@@ -263,6 +270,9 @@ class Projectile:
         self.acid = False
         self.wallshot = False
         self.mine = False
+        # Spent shell ("acid" / "mine" once its payload is delivered):
+        # falls straight down, collides with nothing
+        self.shell: str | None = None
         # Recent positions, oldest first (visual only)
         self.trail: deque[tuple[float, float]] = deque(maxlen=TRAIL_LEN)
 
@@ -283,6 +293,8 @@ class Projectile:
         if not self.alive:
             return
         self.trail.append((self.pos.x, self.pos.y))
+        if self.shell:
+            self.vel.y += SHELL_GRAVITY * dt
         self.pos += self.vel * dt
 
         # Wall bounces
@@ -692,6 +704,8 @@ class Game:
             if not p.alive:
                 continue
             p.update(dt)
+            if p.shell:
+                continue  # spent: just falls out the bottom
             # Homing steering toward nearest brick
             if p.homing and p.alive and self.bricks:
                 p.homing_timer -= dt
@@ -757,14 +771,15 @@ class Game:
         # Acid zones: tick damage on nearby bricks
         self._update_acids(dt)
 
-        # Acid-bullet DoT: 1 dmg per second while active
+        # Acid-bullet burn: 1 dmg per tick, ACIDSHOT_DPS ticks a second
+        tick = 1.0 / ACIDSHOT_DPS
         dissolved: list[Brick] = []
         for b in self.bricks:
             if b.acid_dot > 0:
                 b.acid_dot = max(0.0, b.acid_dot - dt)
                 b.acid_tick += dt
-                while b.acid_tick >= 1.0:
-                    b.acid_tick -= 1.0
+                while b.acid_tick >= tick:
+                    b.acid_tick -= tick
                     if b.shield > 0:
                         b.shield -= 1  # melts armor before flesh
                         continue
@@ -956,16 +971,17 @@ class Game:
 
     def _shield_struck(self, b: Brick):
         """Shield absorbed damage: flash + a few sparks; if it's gone, a
-        burst along the whole bottom edge and a cue."""
+        burst along the whole bottom edge and a cue. Sparks go acid-green
+        while acid is eating the shield (the band turns green too)."""
         b.shield_hit_t = SHIELD_HIT_TIME
         rect = cell_rect(b.col, b.row, b.shape, self._brick_off(b))
+        color = ACID_SHIELD_COLOR if b.acid_t > 0 else SHIELD_SPARK_COLOR
         if b.shield > 0:
-            self._spawn_sparks(rect.centerx, rect.bottom, 3,
-                               SHIELD_SPARK_COLOR)
+            self._spawn_sparks(rect.centerx, rect.bottom, 3, color)
             return
         for i in range(5):
             self._spawn_sparks(rect.left + rect.width * (i + 0.5) / 5,
-                               rect.bottom, 3, SHIELD_SPARK_COLOR)
+                               rect.bottom, 3, color)
         self._emit("shield_break")
 
     def _emit(self, name: str):
@@ -1705,18 +1721,21 @@ class Game:
                                              brick.slow_pct + TARSHOT_SLOW)
                         brick.slow_t = TARSHOT_TIME
                     if proj.acid:
-                        # Acid bullet: 1 dmg/s DoT, 3s from the LAST hit
+                        # Acid bullet: a 3s burn at ACIDSHOT_DPS, then
+                        # the ball drops as a spent shell
                         brick.acid_dot = ACIDSHOT_DOT
                         brick.acid_t = max(brick.acid_t, ACIDSHOT_DOT)
+                        self._spend(proj, "acid")
                     if proj.wallshot:
                         # Wall bullet: full stop, like a lightning stun
                         brick.stun = max(brick.stun, WALLSHOT_STUN)
                     if proj.mine:
                         # Sticky charge: rides the first brick hit and
-                        # blows after the fuse; the ball bounces on
-                        proj.mine = False
+                        # blows after the fuse; the ball drops as a
+                        # spent shell
                         self.sticky_charges.append(
                             {"brick": brick, "timer": STICKY_FUSE})
+                        self._spend(proj, "mine")
 
                     proj.border_hits = 0
                     if brick.hp <= 0:
@@ -1726,6 +1745,14 @@ class Game:
 
         for i in reversed(to_remove):
             self.bricks.pop(i)
+
+    @staticmethod
+    def _spend(proj: Projectile, kind: str):
+        """Payload delivered: the ball becomes an empty shell that drops
+        straight down (and still returns to the pool off the bottom)."""
+        proj.acid = proj.mine = False
+        proj.shell = kind
+        proj.vel.update(0, SHELL_DROP_SPEED)
 
     def _shield_absorbs(self, brick: Brick, off: float, pre_vx: float,
                         pre_vy: float, proj: Projectile) -> bool:
