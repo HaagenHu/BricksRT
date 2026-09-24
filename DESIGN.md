@@ -138,6 +138,51 @@ adding raw damage.
 
 Recommended first: Split shot + Updraft.
 
+### Deflectors (suggestion, not implemented)
+
+Stationary objects that change a ball's direction or position — a
+generalization of Updraft. They sit in the bounce economy: since the
+reload feeder (v0.6.0) caps sustained fire at ~10 balls/s, damage
+comes from how long each ball stays in play, so steering balls back
+into the bricks is strong without adding raw damage.
+
+| Variant | Behavior | Verdict |
+|---------|----------|---------|
+| Paddle, still | Straight line; mirror bounce (same angle out) | **Build first** — readable, rewards bank shots; reuses the brick/wall reflection code |
+| Paddle, rotates on impact | Each hit turns it a few degrees | Good follow-up: a volley fans out across the bricks |
+| Paddle, rotating continuously | Spins on its own | Skip — the bounce becomes luck instead of aim |
+| V-shape | Two joined paddles | Risky: balls can get trapped inside the V; adds little over a tilted line |
+| Portal pair | Enter one, exit the other, velocity kept | **Build second** — most novel; bottom-to-top catches balls about to leave. Needs a limit (below) |
+| Black hole | Gravity well bends passing shots | Later / rare — best visuals, hardest to tune (orbits, unpredictable paths) |
+
+Rules:
+
+- **Lifetime**: ~6s (in line with acid 5s / tar 8s — 3s is barely two
+  field crossings at 600 px/s), or a charge count (e.g. 15
+  deflections), which scales fairly with volley size
+- **Overrun**: a brick touching it destroys it (visible shatter), like
+  placed mines and AoE pickups
+- **Loops**: each deflector hit counts toward the ball's `border_hits`,
+  so the anti-loop gravity still kicks in; portals get a per-ball
+  cooldown (no ping-pong); a black hole caps how far it can turn a
+  shot
+- **Portal limit**: without one, bottom-to-top portals keep balls up
+  forever and make the reload feeder irrelevant — use a charge count,
+  or only take balls moving downward
+- **Who it affects**: normal, fire and homing balls deflect; spent
+  shells (acid/mine) pass straight through
+
+Open question — **delivery**:
+
+- **Mortar ammo type** (lands at the crosshair): most skill, sits next
+  to Wall; the paddle's angle can come from the aim direction
+- **Field pickup** (spawns among bricks, activates when shot, like
+  freeze/lightning): random, no aiming
+
+Proposed first version: the still paddle as a mortar type, angle from
+the aim at launch, ~6s or ~15 hits, shatters when overrun; neon
+visuals + a cue. Portal pair next, with a charge limit.
+
 ---
 
 ## HUD
