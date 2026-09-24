@@ -1671,17 +1671,18 @@ def draw_menu(screen: pygame.Surface, font: pygame.font.Font,
         "Left click / hold — Fire gun",
         "Right click — Fire mortar",
         "Scroll / 1-6 — Select ammo type",
-        "R — Load gun: 1 unit = 5 bullets of it",
+        "R / Middle click — Load gun: 1 unit = 5 bullets",
         "Q — Panic mortars at lowest row",
-        "W — Panic gun: load all types",
+        "A / D — Move turret",
+        "E — Panic gun: load all types",
         "Space — Pause",
         "M — Sound on / off",
         "Esc — Menu",
     ]
-    for i, line in enumerate(controls):
+    for i, line in enumerate(controls):  # 22px rows: all 10 fit on screen
         t = small_font.render(line, True, (110, 110, 140))
         screen.blit(t, t.get_rect(center=(WIDTH // 2,
-                                          HEIGHT * 2 // 3 + 20 + i * 24)))
+                                          HEIGHT * 2 // 3 + 12 + i * 22)))
 
     return play_rect, help_rect
 

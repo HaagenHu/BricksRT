@@ -60,6 +60,11 @@ def main(start_wave: int = 1):
                 if game.phase == "playing":
                     game.fire_mortar()
 
+            # Middle click = R: load the selected ammo into the gun
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:
+                if game.phase == "playing":
+                    game.load_gun()
+
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 mouse_held = False
                 game.stop_fire()
@@ -80,7 +85,9 @@ def main(start_wave: int = 1):
                     game.select_mortar(AMMO_KEYS[event.key])
                 if event.key == pygame.K_r and game.phase == "playing":
                     game.load_gun()
-                if event.key == pygame.K_w and game.phase == "playing":
+                # E, not W: W sits in the A/D movement cluster, and an
+                # accidental panic spends a unit of every ammo type
+                if event.key == pygame.K_e and game.phase == "playing":
                     game.panic_gun()
                 if event.key == pygame.K_q and game.phase == "playing":
                     if game.panic():
@@ -113,6 +120,8 @@ def main(start_wave: int = 1):
 
         # Update aim and fire while playing
         if game.phase == "playing":
+            keys = pygame.key.get_pressed()  # held keys: smooth movement
+            game.move_gun(int(keys[pygame.K_d]) - int(keys[pygame.K_a]), dt)
             game.update_aim(mouse_pos)
             if mouse_held:
                 game.fire_gun()

@@ -26,8 +26,9 @@ Fires single projectiles from the barrel tip. Rapid fire with cooldown.
 
 - Normal balls bounce off bricks, 1 damage per hit; the pool circulates
   (exit at bottom = ammo returns after a 1s reload delay, then feeds
-  back one ball at a time at up to 10/s, and the gun drifts toward the
-  exit point). The feeder caps sustained fire, so a big pool is a
+  back one ball at a time at up to 10/s). The turret slides along the
+  bottom with A/D at 160 px/s (it used to drift toward each ball's exit
+  point). The feeder caps sustained fire, so a big pool is a
   burst reserve rather than endless fire
 - Volley scaling: surplus ammo converts to shots per trigger in a
   small spread — 2 at 15+ ammo, 3 at 30+, 4 at 45+. While firing, the
@@ -58,7 +59,7 @@ first stocked type.
   type (walls excluded) spread along the lowest occupied brick row,
   bypassing the cooldown; mines land one cell below the row; the
   crosshair snaps to the biggest brick on that row
-- Panic gun (W): loads one unit of EVERY stocked gun-capable type
+- Panic gun (E): loads one unit of EVERY stocked gun-capable type
   into the gun queue at once
 
 ### AoE (Passive)
@@ -231,13 +232,14 @@ Advance speed: `base_speed + time_elapsed * 0.1` (capped)
 | Input | Action |
 |-------|--------|
 | Mouse move | Aim crosshair |
+| A / D | Move turret left / right |
 | Left click | Fire gun |
 | Left hold | Rapid fire gun |
 | Right click | Fire mortar at crosshair |
 | Scroll / 1-6 | Select ammo type |
-| R | Load gun: 1 unit of selected type = 5 special bullets (queues) |
+| R / Middle click | Load gun: 1 unit of selected type = 5 special bullets (queues) |
 | Q | Panic mortar: one shell of each stocked type (no walls) at the lowest brick row |
-| W | Panic gun: load one unit of every gun-capable type |
+| E | Panic gun: load one unit of every gun-capable type |
 | Space | Pause |
 | Escape | Menu (saves highscore) |
 

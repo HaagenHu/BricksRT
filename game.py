@@ -56,6 +56,8 @@ GUN_COOLDOWN = 0.12  # seconds between shots
 GUN_BARREL_LEN = 40  # px — shots launch from the barrel tip
 GUN_RELOAD_DELAY = 1.0  # seconds before returned ammo is available
 GUN_FEED_RATE = 10.0    # then balls reload one by one, at most this many/s
+GUN_MOVE_SPEED = 160.0  # px/s the turret slides with A/D (~3s edge to edge)
+GUN_MARGIN = 14         # px: the turret dome stays fully on screen
 STARTING_GUN_AMMO = 1
 # Extra-ball pickup on a new wave's row: a per-wave chance that tapers
 # linearly from START (wave 1) to END (wave TAPER_WAVES and beyond), so
@@ -515,7 +517,7 @@ class Game:
         self.brick_offset = 0.0  # sub-cell scroll offset in pixels
 
         # Gun
-        self.gun_x = WIDTH / 2  # gun position, drifts toward exit points
+        self.gun_x = WIDTH / 2  # gun position, moved with A/D (move_gun)
         self.gun_ammo = STARTING_GUN_AMMO
         self.gun_cooldown = 0.0
         # Returned balls on their way back: game_time each becomes ready
@@ -777,10 +779,6 @@ class Game:
                 else:
                     self.reload_queue.append(self.game_time
                                              + GUN_RELOAD_DELAY)
-                # Nudge gun toward exit point (10% of distance)
-                self.gun_x += (p.pos.x - self.gun_x) * 0.1
-                self.gun_x = max(PROJECTILE_RADIUS,
-                                 min(WIDTH - PROJECTILE_RADIUS, self.gun_x))
         self.projectiles = [p for p in self.projectiles if p.alive]
 
         # Feeder: each returned ball waits GUN_RELOAD_DELAY, then balls
@@ -1665,6 +1663,14 @@ class Game:
         self.gun_queue.extend([mtype] * GUN_LOAD_SHOTS)
         self._sync_sel()
         return True
+
+    def move_gun(self, direction: int, dt: float):
+        """Slide the turret along the bottom: direction -1 (A, left),
+        1 (D, right) or 0. Full speed at once, stops at the field edges."""
+        if self.phase != "playing" or not direction:
+            return
+        self.gun_x += direction * GUN_MOVE_SPEED * dt
+        self.gun_x = max(GUN_MARGIN, min(WIDTH - GUN_MARGIN, self.gun_x))
 
     def panic_gun(self) -> bool:
         """Panic load (W): queue one unit of EVERY stocked gun-capable

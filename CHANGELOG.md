@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Turret moves with A / D** (160 px/s, ~3s edge to edge, full speed
+  at once, stops at the edges, not while paused) instead of drifting
+  10% toward each returning ball's exit point. You now choose where
+  shots, mortar arcs and homing rockets (nearest brick to the gun)
+  start from
+- **Controls**: panic gun moves from W to **E** (W sits in the A/D
+  cluster — an accidental panic spends a unit of every ammo type);
+  **middle click** loads the gun like R. Menu controls list updated
 - **Paddles** (from wave 50): a stationary deflector that appears on
   its own — 20% chance per new wave, up to 2 at once — in open space
   in the lower field at a random tilt (up to 60 deg). It mirror-bounces

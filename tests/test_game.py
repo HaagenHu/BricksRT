@@ -222,7 +222,7 @@ def test_load_gun_queues_and_panic_gun_loads_all():
     gm.select_mortar(g.AMMO_TYPES.index("bomb"))
     assert gm.load_gun()  # queues behind the tar load
     assert gm.gun_queue == ["tar"] * 5 + ["bomb"] * 5
-    # Panic gun (W): one unit of every stocked type at once (all six
+    # Panic gun (E): one unit of every stocked type at once (all six
     # types are gun-capable), in AMMO_TYPES order
     assert gm.panic_gun()  # mine 1, tar 1, homing 1 in stock
     assert gm.gun_queue == (["tar"] * 5 + ["bomb"] * 5 + ["mine"] * 5
@@ -794,6 +794,37 @@ def test_practice_start():
     # A normal start clears practice mode
     gm.start()
     assert not gm.practice and gm.wave == 1
+
+
+def test_turret_moves_with_a_d_not_ball_landings():
+    gm = _fresh_game(wave=5)
+    gm.bricks, gm.pickups = [], []
+    x0 = gm.gun_x
+    # D for 0.5s: right at GUN_MOVE_SPEED
+    for _ in range(30):
+        gm.move_gun(1, 1 / 60)
+    assert abs(gm.gun_x - (x0 + g.GUN_MOVE_SPEED * 0.5)) < 1e-6
+    # A back; 0 = no key: stays put
+    for _ in range(30):
+        gm.move_gun(-1, 1 / 60)
+    gm.move_gun(0, 1.0)
+    assert abs(gm.gun_x - x0) < 1e-6
+    # Stops at the edges
+    gm.move_gun(-1, 60.0)
+    assert gm.gun_x == g.GUN_MARGIN
+    gm.move_gun(1, 60.0)
+    assert gm.gun_x == g.WIDTH - g.GUN_MARGIN
+    # Doesn't move while paused
+    gm.phase = "paused"
+    gm.move_gun(-1, 1.0)
+    assert gm.gun_x == g.WIDTH - g.GUN_MARGIN
+    gm.phase = "playing"
+    # Returning balls no longer drag the gun toward where they land
+    gm.gun_x = 240.0
+    p = Projectile((40.0, g.GRID_BOTTOM - 2), (0, g.PROJECTILE_SPEED))
+    gm.projectiles = [p]
+    gm.update(1 / 60)
+    assert p.exited_bottom and gm.gun_x == 240.0
 
 
 def test_gun_kick_on_fire():
