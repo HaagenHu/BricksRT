@@ -12,6 +12,11 @@
   tunnel through; each deflection counts toward the anti-loop gravity;
   spent shells pass through. New cues for appearing and breaking; a
   FIELD row on the help screen
+- **Fix: shots leaked through walls** — ~28% at 60 fps, ~64% on a
+  30 fps hitch. The wall only caught a ball inside a thin band and
+  judged the bounce by which side the ball was on *now*; a 10-20px
+  step past the line matched neither case. It now sweeps the ball's
+  path this frame and bounces by the side it came from: 0 leaks
 
 ## v0.6.0 — Balance, shields, acid, lightning, practice (2026-09-24)
 

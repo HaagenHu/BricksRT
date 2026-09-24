@@ -1343,6 +1343,28 @@ def test_wall_bounce_no_stick():
     assert wall["max_weight"] == 49  # still just the one chip
 
 
+def test_wall_blocks_fast_steps():
+    """A shot whose frame step carries it past the wall line (or right
+    over the thin catch band) still bounces back — no leaks, at 60 fps
+    or on a 30 fps hitch, from either side."""
+    for dt in (1 / 60, 1 / 30):
+        for direction in (-1, 1):  # rising from below / falling onto it
+            for k in range(40):
+                gm = _fresh_game()
+                gm.bricks, gm.pickups = [], []
+                wall = {"y": 400.0, "max_weight": 10**6, "grace": 0.0,
+                        "ttl": 99.0}
+                gm.placed_walls = [wall]
+                start = 400.0 - direction * (60 + k * 0.37)
+                p = Projectile((240.0, start),
+                               (0.0, direction * g.PROJECTILE_SPEED))
+                for _ in range(20):
+                    p.update(dt)
+                    gm._collide_walls(p)
+                assert (p.pos.y - 400.0) * direction < 0, (dt, direction, k)
+                assert wall["max_weight"] == 10**6 - 1  # exactly one bounce
+
+
 def test_double_hp_spawns():
     # Below the wide unlock, spawn HP is wave or (5% chance) double it
     hps = set()

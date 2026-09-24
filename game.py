@@ -2141,32 +2141,37 @@ class Game:
             self.pickups = [p for p in self.pickups if p not in hit]
 
     def _collide_walls(self, proj: Projectile):
-        """Normal projectiles bounce off walls. Fireballs pass through."""
+        """Normal projectiles bounce off walls. Fireballs pass through.
+
+        Swept along the ball's path this frame (prev -> pos): the side it
+        came FROM decides the bounce, so a ball that stepped past the line
+        (a 10px step at 60fps, 20px on a hitch) still bounces back instead
+        of leaking through. Only shots moving toward the wall bounce — a
+        grazing shot right after its bounce must not re-trigger (it would
+        slide along the wall, chipping it every frame)."""
         if not proj.alive or proj.fireball:
             return
-        py = proj.pos.y
+        reach = PROJECTILE_RADIUS + 2
         for w in self.placed_walls:
             wy = w["y"]
-            if abs(py - wy) < PROJECTILE_RADIUS + 2:
-                # Only bounce shots moving toward the wall — a grazing
-                # shot still inside the band after its bounce must not
-                # re-trigger every frame (it would slide along the wall,
-                # chipping it each frame)
-                if py <= wy and proj.vel.y > 0:
-                    proj.pos.y = wy - PROJECTILE_RADIUS - 1
-                    proj.vel.y = -proj.vel.y
-                    proj._min_rebound("y", -1)
-                elif py > wy and proj.vel.y < 0:
-                    proj.pos.y = wy + PROJECTILE_RADIUS + 1
-                    proj.vel.y = -proj.vel.y
-                    proj._min_rebound("y", 1)
-                else:
-                    continue
-                proj.border_hits = 0
-                # Each bounce chips the wall: its weight capacity drops by 1,
-                # so bouncing your own shots off a wall shortens its life.
-                w["max_weight"] = max(0, w["max_weight"] - 1)
-                break
+            s0, s1 = proj.prev.y - wy, proj.pos.y - wy
+            if s0 < 0 and proj.vel.y > 0 and s1 > -reach:
+                # From above, moving down, reached or crossed the line
+                proj.pos.y = wy - PROJECTILE_RADIUS - 1
+                proj.vel.y = -proj.vel.y
+                proj._min_rebound("y", -1)
+            elif s0 > 0 and proj.vel.y < 0 and s1 < reach:
+                # From below, moving up
+                proj.pos.y = wy + PROJECTILE_RADIUS + 1
+                proj.vel.y = -proj.vel.y
+                proj._min_rebound("y", 1)
+            else:
+                continue
+            proj.border_hits = 0
+            # Each bounce chips the wall: its weight capacity drops by 1,
+            # so bouncing your own shots off a wall shortens its life.
+            w["max_weight"] = max(0, w["max_weight"] - 1)
+            break
 
     def _placed_aoe(self) -> list[tuple[list[dict], object]]:
         """(placed list, trigger fn) pairs for all stationary AoE pickups."""
