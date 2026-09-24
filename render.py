@@ -470,36 +470,86 @@ def draw_bolt(screen: pygame.Surface, bolt: dict, time: float):
 SHIELD_GAP = 3        # px the band floats outside the brick's edge
 SHIELD_GLINT_HZ = 0.6  # glint passes per second
 SHIELD_LAYERED = 0.78  # strength above which a second band shows (7+)
+SHIELD_CURL = 9        # px the band wraps around each end corner
+SHIELD_BEND = 6        # px of rounding at every bend
+
+
+def _round_bends(pts: list[tuple[float, float]],
+                 r: float = SHIELD_BEND) -> list[tuple[float, float]]:
+    """Soften each interior corner of a polyline: cut it back r px along
+    both edges and bow the cut halfway toward the corner."""
+    out = [pts[0]]
+    for a, p, b in zip(pts, pts[1:], pts[2:]):
+        cut = []
+        for q in (a, b):
+            d = math.hypot(q[0] - p[0], q[1] - p[1])
+            k = min(r, d / 2) / d if d else 0.0
+            cut.append((p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k))
+        mid = ((cut[0][0] + cut[1][0]) / 4 + p[0] / 2,
+               (cut[0][1] + cut[1][1]) / 4 + p[1] / 2)
+        out += [cut[0], mid, cut[1]]
+    out.append(pts[-1])
+    return out
+
+
+def _wrap_underside(poly: list[tuple[float, float]]
+                    ) -> list[tuple[float, float]]:
+    """The run of a convex outline's downward-facing edges, continued
+    SHIELD_CURL px around the corner at each end, bends rounded: the
+    band cups the brick the way it does on squares."""
+    n = len(poly)
+    cx = sum(p[0] for p in poly) / n
+    cy = sum(p[1] for p in poly) / n
+
+    def faces_down(i: int) -> bool:
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        ex, ey = x2 - x1, y2 - y1
+        nx, ny = ey, -ex  # a normal; flip it to point away from center
+        if nx * ((x1 + x2) / 2 - cx) + ny * ((y1 + y2) / 2 - cy) < 0:
+            nx, ny = -nx, -ny
+        return ny > 0.05 * math.hypot(nx, ny)
+
+    down = [faces_down(i) for i in range(n)]
+    start = next(i for i in range(n) if down[i] and not down[i - 1])
+    chain = [poly[start]]
+    j = start
+    while down[j % n]:
+        chain.append(poly[(j + 1) % n])
+        j += 1
+
+    def curl(corner, toward):
+        d = math.hypot(toward[0] - corner[0], toward[1] - corner[1])
+        k = min(SHIELD_CURL, d / 2) / d
+        return (corner[0] + (toward[0] - corner[0]) * k,
+                corner[1] + (toward[1] - corner[1]) * k)
+
+    head = curl(chain[0], poly[(start - 1) % n])
+    tail = curl(chain[-1], poly[(j + 1) % n])
+    return _round_bends([head] + chain + [tail])
 
 
 def _shield_edge(shape: str, tri_dir: str, rect: pygame.Rect,
                  gap: float = SHIELD_GAP) -> list[tuple[float, float]]:
-    """Polyline of the downward-facing edges, pushed `gap` px out."""
+    """Polyline of the downward-facing edges, pushed `gap` px out. Most
+    shapes cup the brick (wrapping around their end corners); round and
+    the up/left/right triangles keep a plain edge."""
     cx, cy = rect.center
     h = BRICK_SIZE / 2 + gap
     if shape == "round":  # lower arc, screen angles 0.3 .. pi-0.3
         return [(cx + h * math.cos(a), cy + h * math.sin(a))
                 for a in (0.3 + (math.pi - 0.6) * k / 12 for k in range(13))]
-    if shape == "diamond":
-        return [(cx - h, cy), (cx, cy + h), (cx + h, cy)]
-    if shape == "hexagon":  # the three lower vertices
-        return [(cx + h * math.cos(math.pi / 6 + i * math.pi / 3),
-                 cy + h * math.sin(math.pi / 6 + i * math.pi / 3))
-                for i in range(3)]
-    if shape == "triangle":
+    if shape == "triangle" and tri_dir != "down":
         if tri_dir == "up":
             return [(cx - h, cy + h), (cx + h, cy + h)]
-        if tri_dir == "down":
-            return [(cx - h / 2, cy), (cx, cy + h), (cx + h / 2, cy)]
         if tri_dir == "left":  # bottom slant: apex to bottom-right
             return [(cx - h, cy), (cx + h, cy + h)]
         return [(cx - h, cy + h), (cx + h, cy)]
-    if shape == "trapezoid":
-        return [(cx - h, cy + h), (cx + h, cy + h)]
-    # square / wide / tall: bottom edge cupped up around the corners
-    left, right, bottom = rect.left - gap, rect.right + gap, rect.bottom + gap
-    return [(left, bottom - 9), (left + 2, bottom - 2), (left + 8, bottom),
-            (right - 8, bottom), (right - 2, bottom - 2), (right, bottom - 9)]
+    if shape in ("square", "wide", "tall"):
+        r = rect.inflate(2 * gap, 2 * gap)
+        poly = [r.topleft, r.topright, r.bottomright, r.bottomleft]
+    else:  # diamond, hexagon, triangle down, trapezoid (either way up)
+        poly = shape_points(shape, tri_dir, cx, cy, h)
+    return _wrap_underside([(float(x), float(y)) for x, y in poly])
 
 
 def _along(pts: list[tuple[float, float]],
@@ -693,6 +743,9 @@ def shape_points(shape: str, tri_dir: str, cx: float, cy: float,
                 for i in range(6)]
     if shape == "trapezoid":
         tw = h * 0.6
+        if tri_dir == "down":  # upside down: wide top, narrow base
+            return [(cx - h, cy - h), (cx + h, cy - h),
+                    (cx + tw, cy + h), (cx - tw, cy + h)]
         return [(cx - tw, cy - h), (cx + tw, cy - h),
                 (cx + h, cy + h), (cx - h, cy + h)]
     if shape == "triangle":

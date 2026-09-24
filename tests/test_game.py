@@ -481,6 +481,33 @@ def test_sound_player():
         pygame.mixer.quit()
 
 
+def test_trapezoid_pair():
+    # Both orientations spawn once trapezoids unlock
+    dirs = set()
+    for seed in range(300):
+        random.seed(seed)
+        gm = _fresh_game(wave=g.UNLOCK["trapezoid"])
+        gm.bricks = []
+        gm.spawn_wave()
+        dirs |= {b.tri_dir for b in gm.bricks if b.shape == "trapezoid"}
+    assert dirs == {"up", "down"}
+
+    # Collision follows the orientation: a ball rising into the bottom
+    # corner hits the wide base of an upright trapezoid, but passes the
+    # narrow base of an upside-down one
+    def rises_into_corner(tri_dir):
+        gm = _fresh_game(wave=40)
+        b = Brick(col=3, row=4, hp=10, shape="trapezoid", tri_dir=tri_dir)
+        gm.bricks = [b]
+        rect = g.cell_rect(3, 4, "square", gm._brick_off(b))
+        x = rect.centerx + g.BRICK_SIZE * 0.42
+        p = Projectile((x, rect.bottom + 2), (0, -g.PROJECTILE_SPEED))
+        return gm._collide_trapezoid(p, b, gm._brick_off(b))
+
+    assert rises_into_corner("up")
+    assert not rises_into_corner("down")
+
+
 def test_shield_flash_and_break():
     gm = _fresh_game(wave=60)
     b = Brick(col=3, row=4, hp=50, shield=2)

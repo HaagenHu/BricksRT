@@ -210,7 +210,8 @@ class Brick:
     row: int
     hp: int
     shape: str = "square"
-    tri_dir: str = "up"
+    tri_dir: str = "up"  # orientation: triangles up/down/left/right,
+                         # trapezoids up (narrow top) / down (narrow base)
     shield: int = 0
     held: float = 0.0    # px held back by a wall/stack this frame
     acid_t: float = 0.0  # seconds of acid tint remaining
@@ -1225,8 +1226,14 @@ class Game:
             occupied.add(c)
             if shape == "wide":
                 hp *= 2
-            tri_dir = (random.choice(["up", "down", "left", "right"])
-                       if shape == "triangle" else "up")
+            # Orientation: triangles point any way; trapezoids come as an
+            # up/down pair (narrow top / narrow base)
+            if shape == "triangle":
+                tri_dir = random.choice(["up", "down", "left", "right"])
+            elif shape == "trapezoid":
+                tri_dir = random.choice(["up", "down"])
+            else:
+                tri_dir = "up"
             shield = 0
             if self.wave >= UNLOCK["shields"] and random.random() < 0.15:
                 shield = max(2, self.wave // 5)
@@ -1825,8 +1832,12 @@ class Game:
         cx, cy = rect.center
         hw, hh = BRICK_SIZE / 2, BRICK_SIZE / 2
         tw = hw * 0.6
-        verts = [(cx - tw, cy - hh), (cx + tw, cy - hh),
-                 (cx + hw, cy + hh), (cx - hw, cy + hh)]
+        if brick.tri_dir == "down":  # upside down: wide top, narrow base
+            verts = [(cx - hw, cy - hh), (cx + hw, cy - hh),
+                     (cx + tw, cy + hh), (cx - tw, cy + hh)]
+        else:
+            verts = [(cx - tw, cy - hh), (cx + tw, cy - hh),
+                     (cx + hw, cy + hh), (cx - hw, cy + hh)]
         return self._collide_polygon(proj, verts, cx, cy)
 
     def tri_verts(self, brick: Brick, y_offset: float = 0):

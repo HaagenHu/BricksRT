@@ -8,7 +8,13 @@
   and glow scale with strength, with a second faint band at 7+, so
   wear is visible. Absorbing damage flashes it white with a few cyan
   sparks; breaking throws sparks along the whole edge and plays a new
-  glassy shatter cue
+  glassy shatter cue. The band cups the brick — continuing around its
+  end corners with rounded bends — on squares, diamonds, hexagons,
+  downward triangles and trapezoids; round bricks and up/left/right
+  triangles keep a plain edge
+- **New shape — upside-down trapezoid**: trapezoids now come in an
+  up/down pair like the triangles (narrow top / narrow base), chosen
+  50/50 from wave 30; collision follows the orientation
 - **Balance — reload feeder**: returned balls still wait 1s, then
   reload one at a time at up to 10/s (was: every ball back in the
   same second released together). Big pools become a burst reserve —
