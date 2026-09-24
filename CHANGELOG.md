@@ -1,63 +1,79 @@
 # Changelog
 
-## Unreleased
+## v0.6.0 — Balance, shields, acid, lightning, practice (2026-09-24)
 
-- **Shields**: an energy band floating just outside the brick's
-  downward-facing edges (cupped around the corners on square bricks):
-  layered glow, gentle pulse and a glint gliding along it. Thickness
-  and glow scale with strength, with a second faint band at 7+, so
-  wear is visible. Absorbing damage flashes it white with a few cyan
-  sparks; breaking throws sparks along the whole edge and plays a new
-  glassy shatter cue. The band cups the brick — continuing around its
-  end corners with rounded bends — on squares, diamonds, hexagons,
-  downward triangles and trapezoids; round bricks and up/left/right
-  triangles keep a plain edge
-- **Shields block exactly what the band covers**: a bounce counts
-  against the shield when it lands on a downward-facing face, or
-  within the band's wrap around the end corners (was: any upward hit
-  from below the brick's center line). So downward triangles and
-  upside-down trapezoids are shielded along their whole underside,
-  and square bricks' lower side corners are now shielded too. The
-  geometry lives in game.py and the renderer draws from it
-- **Acid and sticky-mine bullets are one-shot**: they deliver their
-  payload on the first brick they hit, then drop straight down as a
-  hollow spent shell (no more bounces or collisions) and return to the
-  pool off the bottom as usual. Before, both kept bouncing
-- **Acid bullet burn doubled** to 2 damage/s: one tick per second for
-  3s, 2 damage each (6 total), shields first; a shield being eaten by
-  acid (bullet burn or pool) glows acid-green and throws green sparks
-- **Acid is twice as effective on shields as on hp** (burn and pool):
-  a burn tick takes 4 shield points (or 2 hp); a pool tick takes
-  2 x (wave / 15) shield points (or wave / 15 hp). A tick that
-  finishes a shield still doesn't spill onto hp
-- **Acid pool damage** lowered from wave / 10 to wave / 15 per tick
-- **New shape — upside-down trapezoid**: trapezoids now come in an
+### Balance
+
+- **Reload feeder**: returned balls still wait 1s, then reload one at
+  a time at up to 10/s (was: every ball back in the same second
+  released together). Big pools become a burst reserve — held fire
+  drains them, then trickles at ~10 balls/s. Sustained fire with 60
+  balls drops from ~19 to ~9 balls/s; pools of 15 or fewer are
+  unchanged
+- **Fewer extra balls late**: a new wave's row carries an extra-ball
+  pickup by chance, tapering from 80% at wave 1 to 40% at wave 100 and
+  after (was: every wave except every 5th). A perfect run arrives at
+  wave 100 with ~61 balls instead of 81; early waves are nearly
+  unchanged (~8 by wave 10, was 9)
+
+### Acid and mine bullets
+
+- **One-shot**: acid and sticky-mine bullets deliver their payload on
+  the first brick they hit, then drop straight down as a hollow spent
+  shell (no more bounces or collisions) and return to the pool off the
+  bottom as usual. Before, both kept bouncing
+- **Acid numbers**: bullet burn is one tick per second for 3s at 2
+  damage (was 1/s: now 6 total); the acid pool deals wave / 15 per
+  tick (was wave / 10). Both are **twice as effective on shields** —
+  a burn tick takes 4 shield points or 2 hp, a pool tick 2 x (wave /
+  15) shield or wave / 15 hp — and a tick that finishes a shield
+  doesn't spill onto hp. A shield being eaten by acid glows acid-green
+  and throws green sparks
+
+### Shields
+
+- **Energy band**: floats just outside the brick's downward-facing
+  edges with layered glow, a gentle pulse and a glint gliding along
+  it. It cups the brick — continuing around its end corners with
+  rounded bends — on squares, diamonds, hexagons, downward triangles
+  and trapezoids; round bricks and up/left/right triangles keep a
+  plain edge. Thickness and glow scale with strength, with a second
+  faint band at 7+, so wear is visible
+- **Feedback**: absorbing damage flashes it white with a few sparks;
+  breaking throws sparks along the whole edge and plays a new glassy
+  shatter cue
+- **Blocks exactly what the band covers**: a bounce counts against the
+  shield when it lands on a downward-facing face, or within the band's
+  wrap around the end corners (was: any upward hit from below the
+  brick's center line). Downward triangles and upside-down trapezoids
+  are shielded along their whole underside, and square bricks' lower
+  side corners are shielded too. The geometry lives in game.py and the
+  renderer draws from it
+
+### Bricks
+
+- **New shape — upside-down trapezoid**: trapezoids come in an
   up/down pair like the triangles (narrow top / narrow base), chosen
   50/50 from wave 30; collision follows the orientation
-- **Balance — reload feeder**: returned balls still wait 1s, then
-  reload one at a time at up to 10/s (was: every ball back in the
-  same second released together). Big pools become a burst reserve —
-  held fire drains them, then trickles at ~10 balls/s. Sustained fire
-  with 60 balls drops from ~19 to ~9 balls/s; pools of 15 or fewer are
-  unchanged
-- **Balance — fewer extra balls late**: a new wave's row now carries
-  an extra-ball pickup by chance, tapering from 80% at wave 1 to 40% at
-  wave 100 and after (was: every wave except every 5th). A perfect run
-  arrives at wave 100 with ~61 balls instead of 81; early waves are
-  nearly unchanged (~8 by wave 10, was 9)
-- **Practice start** (`py main.py --wave N`): jump to wave N with a
-  matching arsenal — the balls a perfect run would hold by then on
-  average and 3 of each unlocked ammo type — for
-  testing late-game content; marked PRACTICE in the HUD and never
-  records a highscore
+- Bigger brick HP numbers (they shrink only when they'd overflow a
+  triangle or diamond)
+
+### Visuals
+
 - **Lightning**: the bolt chains nearest-first through its targets
   (was a random zigzag) and is re-jagged 30x/s so it crackles, with
   forks, layered glow, flares on each struck brick, sparks, a brief
   field flash and a small shake; it lingers 0.45s (was 0.35s) with a
   strobe then a fade. Struck bricks crackle with arcs while stunned.
   The jagging no longer draws from the gameplay RNG
-- Bigger extra-ball "+" and brick HP numbers (numbers shrink only when
-  they'd overflow a triangle or diamond); roomier help screen
+- Bigger extra-ball "+"; roomier help screen
+
+### Tools
+
+- **Practice start** (`py main.py --wave N`): jump to wave N with a
+  matching arsenal — the balls a perfect run would hold by then on
+  average and 3 of each unlocked ammo type — for testing late-game
+  content; marked PRACTICE in the HUD and never records a highscore
 
 ## v0.5.1 — Sound effects (2026-09-24)
 
