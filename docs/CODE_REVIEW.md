@@ -16,11 +16,11 @@ findings were confirmed with headless simulations (below).
 | 1 | High | Walls | Bricks resting on a wall get hit *through* it | Fixed |
 | 2 | High | Paddles | Kick paddles let tip hits pass through | Fixed |
 | 3 | Medium | Collisions | Swept checks use a stale `prev` after a relocation | Fixed |
-| 4 | Medium | Paddles | Overrun test uses the full cell, not the brick's shape | Open |
-| 5 | Low | Paddles | Spawn ignores walls, pickups, AoE icons, mines | Open |
-| 6 | Low | Render | Paddle help icon doesn't use the `_bar` helper | Open |
-| 7 | Low | Docs | `panic_gun` docstring still says W | Open |
-| 8 | Low | Perf | Overrun check rebuilds every brick rect per frame | Open |
+| 4 | Medium | Paddles | Overrun test uses the full cell, not the brick's shape | Fixed |
+| 5 | Low | Paddles | Spawn ignores walls, pickups, AoE icons, mines | Fixed |
+| 6 | Low | Render | Paddle help icon doesn't use the `_bar` helper | Fixed |
+| 7 | Low | Docs | `panic_gun` docstring still says W | Fixed |
+| 8 | Low | Perf | Overrun check rebuilds every brick rect per frame | Fixed |
 
 ## Findings
 
@@ -95,6 +95,11 @@ visibly clear. The same test decides spawn clearance.
 **Fix:** test against `brick_outline()` (point-in-polygon, circle for
 round), inflated by the margin.
 
+**Fixed:** `_paddle_blocked` measures the gap between the bar and the
+brick's outline (`seg_poly_dist`; center distance for round), counting
+the bar's drawn half-width `PADDLE_HALF_WIDTH`
+(`test_paddle_overrun_follows_brick_shape`).
+
 ### 5. Paddle spawn ignores walls, pickups, AoE icons, mines — Low
 
 `game.py:1476` — `_spawn_paddle` only avoids bricks and other paddles.
@@ -105,16 +110,21 @@ deflecting the shots that would trigger it.
 **Fix:** also require clearance from `placed_walls` (a y-band),
 `pickups`, placed AoE items and mines.
 
+**Fixed:** new `_paddle_crowds` check in `_spawn_paddle`, applied to a
+spinner's whole sweep like the brick check
+(`test_paddle_spawn_clear_of_walls_and_items`).
+
 ### 6. Paddle help icon doesn't use the `_bar` helper — Low
 
 `render.py:687` — `draw_paddle_icon` draws with thick diagonal
 `pygame.draw.line`, which renders thinner than its width — the exact
 problem `_bar()` (a few lines above) exists to fix. The icon looks
-unlike the in-game paddle. **Fix:** call `_bar()`.
+unlike the in-game paddle. **Fix:** call `_bar()`. **Fixed.**
 
 ### 7. `panic_gun` docstring still says W — Low
 
 `game.py:1676` — "Panic load (W)"; the key moved to E in v0.7.0.
+**Fixed.**
 
 ### 8. Overrun check rebuilds every brick rect per frame — Low
 
@@ -122,3 +132,6 @@ unlike the in-game paddle. **Fix:** call `_bar()`.
 `Rect` constructions and ~810 point tests with 2 paddles and 45 bricks,
 to detect an event that happens once per paddle. **Fix:** only test
 bricks whose rect overlaps the paddle's bounding box.
+
+**Fixed:** a plain-number box reject skips distant bricks before the
+outline test. 2 paddles, 45 bricks: 112 → 35 µs per frame.

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.7.2 — Paddle fixes from the code review (2026-09-24)
+
+- **Paddles follow brick shapes**: a paddle shatters only when a
+  brick's actual outline reaches the bar — no more breaking on a
+  diamond's or round brick's empty cell corners
+- **Paddles spawn in the clear**: besides bricks and other paddles, a
+  new paddle now avoids wall lines, pickups, placed Freeze / Reverse /
+  Lightning / Skull icons and mines (spinners over their whole sweep)
+- **Faster overrun check**: distant bricks are skipped before the
+  outline test (2 paddles, 45 bricks: 112 → 35 µs per frame)
+- **Help screen**: the paddle icon draws like the in-game paddle
+  (full width at any angle, round caps)
+- All 8 findings in `docs/CODE_REVIEW.md` are now fixed
+
 ## v0.7.1 — Collision fixes from the code review (2026-09-24)
 
 - **Walls shield the bricks resting on them**: walls are now checked

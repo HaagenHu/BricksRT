@@ -683,6 +683,51 @@ def test_kick_paddle_tips_hold():
             assert abs(a) == g.math.radians(g.PADDLE_KICK), (turn, k)
 
 
+def test_paddle_overrun_follows_brick_shape():
+    """Only the brick's outline overruns a paddle, not its empty cell
+    corners."""
+    gm = _fresh_game(wave=60)
+    gm.pickups, gm.brick_offset = [], 0.0
+    h = g.PADDLE_LEN / 2
+    for shape in ("diamond", "round"):
+        brick = Brick(col=3, row=5, hp=5, shape=shape)
+        gm.bricks = [brick]
+        cx, cy = g.cell_rect(3, 5, "square", gm._brick_off(brick)).center
+        # Bar starting in the cell's empty lower-right corner: clear
+        pd = _paddle(gm, x=cx + 22 + h, y=cy + 22)
+        assert not gm._paddle_blocked(pd, margin=0), shape
+        # Bar reaching into the shape itself: overrun
+        pd = _paddle(gm, x=cx + 10 + h, y=cy + 10)
+        assert gm._paddle_blocked(pd, margin=0), shape
+    # Crossing a brick with both ends outside it still counts
+    gm.bricks = [Brick(col=3, row=5, hp=5, shape="diamond")]
+    pd = _paddle(gm, x=cx, y=cy, deg=90)  # 70px bar through a 56px brick
+    assert gm._paddle_blocked(pd, margin=0)
+    assert g.seg_poly_dist((0, 5), (10, 5), [(0, 0), (10, 0), (10, 10), (0, 10)]) == 0
+    assert abs(g.seg_poly_dist((0, 15), (10, 15),
+                               [(0, 0), (10, 0), (10, 10), (0, 10)]) - 5) < 1e-9
+
+
+def test_paddle_spawn_clear_of_walls_and_items():
+    gm = _fresh_game(wave=60)
+    gm.bricks = []
+    lo, hi = g.GRID_TOP + g.CELL_SIZE * 3, g.GRID_BOTTOM - g.CELL_SIZE * 1.5
+    spawned = 0
+    for seed in range(100):
+        random.seed(seed)
+        gm.paddles = []
+        gm.placed_walls = [{"y": lo + (hi - lo) * 0.5, "max_weight": 9,
+                            "grace": 0.0, "ttl": 9.0}]
+        gm.pickups = [{"col": 2, "row": 6, "type": "ammo"}]
+        gm.placed_freezes = [{"x": 300.0, "y": lo + 40}]
+        gm.placed_mines = [{"x": 150.0, "y": hi - 30}]
+        gm._spawn_paddle()
+        for pd in gm.paddles:
+            spawned += 1
+            assert not gm._paddle_crowds(pd, margin=0), seed
+    assert spawned > 50  # still finds room most of the time
+
+
 def test_paddle_spawns_from_its_wave_clear_of_bricks():
     seen_early = seen_late = 0
     for seed in range(200):

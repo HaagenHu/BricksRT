@@ -684,8 +684,8 @@ def draw_paddle_icon(screen: pygame.Surface, px: int, py: int):
     """Help-screen icon: a small tilted glowing bar."""
     a, b = (px - 9, py + 5), (px + 9, py - 5)
     draw_glow(screen, PADDLE_COLOR, px, py, 14, 0.4)
-    pygame.draw.line(screen, _mix(BG_COLOR, PADDLE_COLOR, 0.45), a, b, 7)
-    pygame.draw.line(screen, PADDLE_COLOR, a, b, 3)
+    _bar(screen, _mix(BG_COLOR, PADDLE_COLOR, 0.45), a, b, 7)
+    _bar(screen, PADDLE_COLOR, a, b, 3)
 
 
 def _draw_crackle(screen: pygame.Surface, rect: pygame.Rect, brick: Brick,

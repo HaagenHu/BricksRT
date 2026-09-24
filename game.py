@@ -149,6 +149,7 @@ PADDLE_CHANCE = 0.20      # per new wave, from UNLOCK["paddle"]
 PADDLE_MAX = 2            # at once
 PADDLE_LIFE = 6.0         # seconds
 PADDLE_LEN = 70.0         # px
+PADDLE_HALF_WIDTH = 3.0   # px: half the drawn bar's solid core
 PADDLE_MAX_TILT = 60.0    # degrees either side of horizontal
 PADDLE_FLASH_TIME = 0.12  # visual flash per deflection
 PADDLE_COLOR = (150, 190, 255)
@@ -448,6 +449,42 @@ def brick_outline(brick: "Brick",
         return [r.topleft, r.topright, r.bottomright, r.bottomleft]
     cx, cy = cell_rect(brick.col, brick.row, "square", y_offset).center
     return shape_points(brick.shape, brick.tri_dir, cx, cy, BRICK_SIZE / 2)
+
+
+def seg_point_dist(ax: float, ay: float, bx: float, by: float,
+                   px: float, py: float) -> float:
+    """Distance from point p to segment a-b."""
+    ex, ey = bx - ax, by - ay
+    len_sq = ex * ex + ey * ey
+    t = 0.0 if len_sq == 0 else max(0.0, min(1.0, ((px - ax) * ex
+                                                   + (py - ay) * ey) / len_sq))
+    return math.hypot(px - (ax + t * ex), py - (ay + t * ey))
+
+
+def seg_poly_dist(a: tuple[float, float], b: tuple[float, float],
+                  poly: list[tuple[float, float]]) -> float:
+    """Gap between segment a-b and a convex polygon; 0 if they touch or
+    overlap."""
+    def cross(o, p, q):
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+    n = len(poly)
+    # An endpoint inside: on the same side of every edge
+    for pt in (a, b):
+        sides = [cross(poly[i], poly[(i + 1) % n], pt) for i in range(n)]
+        if all(s >= 0 for s in sides) or all(s <= 0 for s in sides):
+            return 0.0
+    best = float("inf")
+    for i in range(n):
+        c, d = poly[i], poly[(i + 1) % n]
+        if (cross(a, b, c) * cross(a, b, d) < 0
+                and cross(c, d, a) * cross(c, d, b) < 0):
+            return 0.0  # the segment crosses this edge
+        best = min(best,
+                   seg_point_dist(*a, *b, *c),
+                   seg_point_dist(*c, *d, *a),
+                   seg_point_dist(*c, *d, *b))
+    return best
 
 
 def extra_ball_chance(wave: int) -> float:
@@ -1435,20 +1472,52 @@ class Game:
                 (pd["x"] + ux * h, pd["y"] + uy * h))
 
     def _paddle_blocked(self, pd: dict, margin: float) -> bool:
-        """Does any brick cover (or come within margin of) the paddle?"""
-        (x1, y1), (x2, y2) = self._paddle_ends(pd)
-        pts = [(x1 + (x2 - x1) * k / 8, y1 + (y2 - y1) * k / 8)
-               for k in range(9)]
-        for b in self.bricks:
-            r = cell_rect_full(b.col, b.row, b.shape, self._brick_off(b))
-            r = r.inflate(margin * 2, margin * 2)
-            if any(r.collidepoint(px, py) for px, py in pts):
+        """Does any brick's actual shape touch (or come within margin of)
+        the paddle's bar?"""
+        a, b = self._paddle_ends(pd)
+        reach = margin + PADDLE_HALF_WIDTH
+        lo_x, hi_x = min(a[0], b[0]) - reach, max(a[0], b[0]) + reach
+        lo_y, hi_y = min(a[1], b[1]) - reach, max(a[1], b[1]) + reach
+        for brick in self.bricks:
+            off = self._brick_off(brick)
+            # Cheap reject: the brick's cell against the bar's box
+            x0 = brick.col * CELL_SIZE
+            y0 = GRID_TOP + brick.row * CELL_SIZE + off
+            x1 = x0 + CELL_SIZE * (2 if brick.shape == "wide" else 1)
+            y1 = y0 + CELL_SIZE * (2 if brick.shape == "tall" else 1)
+            if x0 > hi_x or x1 < lo_x or y0 > hi_y or y1 < lo_y:
+                continue
+            poly = brick_outline(brick, off)
+            if poly is None:  # round
+                cx, cy = cell_rect(brick.col, brick.row, "square", off).center
+                gap = seg_point_dist(*a, *b, cx, cy) - BRICK_SIZE / 2
+            else:
+                gap = seg_poly_dist(a, b, poly)
+            if gap <= reach:
                 return True
         return False
 
+    def _paddle_crowds(self, pd: dict, margin: float) -> bool:
+        """Would the paddle sit on a wall line, or over a pickup, a placed
+        AoE icon or a mine (hiding it and deflecting its shots)?"""
+        a, b = self._paddle_ends(pd)
+        reach = margin + PADDLE_HALF_WIDTH
+        top, bottom = min(a[1], b[1]), max(a[1], b[1])
+        if any(top - reach <= w["y"] <= bottom + reach
+               for w in self.placed_walls):
+            return True
+        spots = [(cell_rect(pu["col"], pu["row"], "square",
+                            self.brick_offset).center, BRICK_SIZE * 0.25)
+                 for pu in self.pickups]
+        for placed, _ in self._placed_aoe():
+            spots += [((it["x"], it["y"]), 10) for it in placed]
+        spots += [((m["x"], m["y"]), 10) for m in self.placed_mines]
+        return any(seg_point_dist(*a, *b, x, y) <= radius + reach
+                   for (x, y), radius in spots)
+
     def _spawn_paddle(self):
         """A random tilted paddle in open space in the lower field, clear
-        of bricks, other paddles and the gun."""
+        of bricks, other paddles, walls, pickups, AoE icons and mines."""
         h = PADDLE_LEN / 2
         for _ in range(20):
             tilt = math.radians(random.uniform(-PADDLE_MAX_TILT,
@@ -1471,6 +1540,7 @@ class Game:
             angles = ([tilt + math.pi * k / 6 for k in range(6)]
                       if kind == "spin" else [tilt])
             if any(self._paddle_blocked({**pd, "angle": a}, margin=12)
+                   or self._paddle_crowds({**pd, "angle": a}, margin=12)
                    for a in angles):
                 continue
             self.paddles.append(pd)
@@ -1685,7 +1755,7 @@ class Game:
         self.gun_x = max(GUN_MARGIN, min(WIDTH - GUN_MARGIN, self.gun_x))
 
     def panic_gun(self) -> bool:
-        """Panic load (W): queue one unit of EVERY stocked gun-capable
+        """Panic load (E): queue one unit of EVERY stocked gun-capable
         type into the gun at once."""
         loaded = False
         for mtype in AMMO_TYPES:
